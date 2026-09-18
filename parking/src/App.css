@@ -17,6 +17,84 @@
 
 .bm-app * { box-sizing: border-box; }
 
+.bm-auth {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: var(--text);
+}
+
+.bm-auth-form {
+  width: min(380px, calc(100% - 32px));
+  display: grid;
+  gap: 14px;
+  padding: 28px;
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+}
+
+.bm-auth-form h1 {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 28px;
+}
+
+.bm-auth-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bm-auth-form input {
+  padding: 10px;
+  border: 1px solid var(--panel-line);
+  border-radius: 5px;
+  background: var(--ink);
+  color: var(--text);
+  font: inherit;
+}
+
+.bm-auth-kicker,
+.bm-auth-error {
+  font-size: 12px;
+}
+
+.bm-auth-kicker {
+  margin: 0;
+  color: var(--amber);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.bm-auth-error {
+  margin: 0;
+  color: #f58b8b;
+}
+
+.bm-google-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--panel-line);
+  background: transparent;
+  color: var(--text);
+  border-radius: 6px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.bm-auth-switch {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+}
+
 .bm-header {
   display: flex;
   align-items: center;

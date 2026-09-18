@@ -1,4 +1,12 @@
-import { useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
+import {
+  createUserWithEmailAndPassword,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+} from "firebase/auth";
 import {
   MapContainer,
   TileLayer,
@@ -8,12 +16,13 @@ import {
   useMap,
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
+import { auth } from "./firebase";
 import "./App.css";
 
 // ---- Sample data: a small fictional campus, 6 buildings ----
 // Swap these for your real footprints (traced by hand, or pulled from
 // the Overpass API) — everything else keeps working unchanged.
-const CENTER = [12.9716, 77.5946];
+const CENTER = [12.8407, 77.6763];
 
 const BUILDINGS = [
   {
@@ -122,7 +131,95 @@ function BuildingLayer({ building, isSelected, onSelect }) {
   );
 }
 
-export default function BuildingMap() {
+function ProtectedRoute({ user, children }) {
+  if (!user) {
+    return <AuthScreen />;
+  }
+
+  return children;
+}
+
+function AuthScreen() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setError("");
+
+    try {
+      if (isRegistering) {
+        await createUserWithEmailAndPassword(auth, email, password);
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+    } catch {
+      setError("Unable to authenticate. Check your email and password.");
+    }
+  }
+
+  async function handleGoogleSignIn() {
+    const provider = new GoogleAuthProvider();
+
+    try {
+      await signInWithPopup(auth, provider);
+    } catch {
+      setError("Google sign-in failed. Please try again.");
+    }
+  }
+
+  return (
+    <main className="bm-auth">
+      <form className="bm-auth-form" onSubmit={handleSubmit}>
+        <p className="bm-auth-kicker">Campus access</p>
+        <h1>{isRegistering ? "Create account" : "Sign in"}</h1>
+
+        <label>
+          Email
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            required
+          />
+        </label>
+
+        <label>
+          Password
+          <input
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            minLength={6}
+            required
+          />
+        </label>
+
+        {error && <p className="bm-auth-error">{error}</p>}
+
+        <button className="bm-locate-btn" type="submit">
+          {isRegistering ? "Create account" : "Sign in"}
+        </button>
+
+        <button type="button" className="bm-google-btn" onClick={handleGoogleSignIn}>
+          Continue with Google
+        </button>
+
+        <button
+          className="bm-auth-switch"
+          type="button"
+          onClick={() => setIsRegistering((value) => !value)}
+        >
+          {isRegistering ? "Already have an account?" : "Create an account"}
+        </button>
+      </form>
+    </main>
+  );
+}
+
+function BuildingMap() {
   const [selectedId, setSelectedId] = useState(null);
   const [userLocation, setUserLocation] = useState(null); // { lat, lng, accuracy }
   const [status, setStatus] = useState("");
@@ -167,9 +264,14 @@ export default function BuildingMap() {
           <h1>Small-Area Campus Map</h1>
           <p>6 buildings · footprint polygons · click to inspect</p>
         </div>
-        <button className="bm-locate-btn" onClick={locate}>
-          Find my location
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button className="bm-locate-btn" onClick={locate}>
+            Find my location
+          </button>
+          <button className="bm-signout-btn" onClick={() => signOut(auth)}>
+            Sign out
+          </button>
+        </div>
       </header>
 
       <main className="bm-main">
@@ -250,5 +352,23 @@ export default function BuildingMap() {
         </aside>
       </main>
     </div>
+  );
+}
+
+export default function App() {
+  const [user, setUser] = useState(undefined);
+
+  useEffect(() => {
+    return onAuthStateChanged(auth, setUser);
+  }, []);
+
+  if (user === undefined) {
+    return null;
+  }
+
+  return (
+    <ProtectedRoute user={user}>
+      <BuildingMap />
+    </ProtectedRoute>
   );
 }
