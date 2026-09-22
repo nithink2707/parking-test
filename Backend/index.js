@@ -17,10 +17,19 @@ app.get('/api',async (req,res) => {
 })
 
 app.post('/insert',async (req,res) => {
-    const rec = req.body
+    const rec = req.body.data
     console.log(rec);
-    await pool.query('INSERT INTO buildings (data) VALUES ($1::jsonb)',[rec]);
-    res.json({message:'inserted succesfully'});
+    if (!rec || rec.name == null || rec.location == null) {
+        return res.status(400).json({message:'name and location are required'});
+    }
+
+    try {
+        await pool.query('INSERT INTO buildings (data) VALUES ($1::jsonb)',[rec]);
+        res.json({message:'inserted successfully'});
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({message:'could not insert building'});
+    }
 })
 
 const PORT = process.env.PORT || 8080;

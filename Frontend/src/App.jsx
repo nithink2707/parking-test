@@ -23,7 +23,6 @@ import "./App.css";
 // Swap these for your real footprints (traced by hand, or pulled from
 // the Overpass API) — everything else keeps working unchanged.
 const CENTER = [12.8407, 77.6763];
-const res = fetch("")
 const BUILDINGS = []
 
 const BUILDING_DIRECTORY = [
@@ -157,6 +156,8 @@ function BuildingMap() {
   const [selectedId, setSelectedId] = useState(BUILDINGS[0]?.id ?? null);
   const [userLocation, setUserLocation] = useState(null); // { lat, lng, accuracy }
   const [status, setStatus] = useState("");
+  const [buildingName, setBuildingName] = useState("");
+  const [location, setLocation] = useState("");
   const mapRef = useRef(null);
 
   const selectedBuilding = BUILDINGS.find((b) => b.id === selectedId) ?? null;
@@ -190,6 +191,40 @@ function BuildingMap() {
       { enableHighAccuracy: true, timeout: 10000 }
     );
   }, []);
+
+  async function handleBuildingSubmit(event) {
+    event.preventDefault();
+    const coordinates = location.split(",").map((value) => Number(value.trim()));
+
+    if (coordinates.length !== 2 || coordinates.some((value) => !Number.isFinite(value))) {
+      setStatus("Location must contain two numbers, for example: 120, 100.");
+      return;
+    }
+
+    try {
+      const response = await fetch("https://parking-test.onrender.com/insert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          data: {
+            name: buildingName.trim(),
+            location: coordinates,
+          },
+        }),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.message || "Could not add building.");
+      }
+
+      setStatus(result.message);
+      setBuildingName("");
+      setLocation("");
+    } catch (error) {
+      setStatus(error.message || "Could not connect to the backend.");
+    }
+  }
 
   return (
     <div className="bm-app">
@@ -285,23 +320,30 @@ function BuildingMap() {
               ))}
             </ul>
 
-            <form className="bm-building-form" onSubmit={(event) => event.preventDefault()}>
+            <form className="bm-building-form" onSubmit={handleBuildingSubmit}>
               <label>
                 Building name
-                <input type="text" placeholder="New building" />
+                <input
+                  type="text"
+                  placeholder="New building"
+                  value={buildingName}
+                  onChange={(event) => setBuildingName(event.target.value)}
+                  required
+                />
               </label>
 
               <label>
-                Purpose
-                <input type="text" placeholder="Lab, office, parking" />
+                Location
+                <input
+                  type="text"
+                  placeholder="120, 100"
+                  value={location}
+                  onChange={(event) => setLocation(event.target.value)}
+                  required
+                />
               </label>
 
-              <label>
-                Floors
-                <input type="number" min="1" defaultValue="1" />
-              </label>
-
-              <button type="submit" className="bm-locate-btn">Queue for backend</button>
+              <button type="submit" className="bm-locate-btn">Add building</button>
             </form>
           </div>
 
