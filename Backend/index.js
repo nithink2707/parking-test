@@ -21,3 +21,6 @@ app.post('/insert',async (req,res) => {
     await pool.query('INSERT INTO buildings (data) VALUES ($1::jsonb)',rec);
     res.json({message:'inserted succesfully'});
 })
+
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
