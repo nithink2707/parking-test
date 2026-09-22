@@ -16,7 +16,7 @@ app.get('/api',async (req,res) => {
 })
 
 app.post('/insert',async (req,res) => {
-    const rec = req.body;
+    const rec = req.body.json();
     console.log(rec.data);
     await pool.query('INSERT INTO buildings (data) VALUES ($1::jsonb)',rec.data);
     res.json({message:'inserted succesfully'});
