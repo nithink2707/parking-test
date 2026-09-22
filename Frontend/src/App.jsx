@@ -23,80 +23,14 @@ import "./App.css";
 // Swap these for your real footprints (traced by hand, or pulled from
 // the Overpass API) — everything else keeps working unchanged.
 const CENTER = [12.8407, 77.6763];
+const res = fetch("")
+const BUILDINGS = []
 
-const BUILDINGS = [
-  {
-    id: "A",
-    name: "Building A — Admin",
-    use: "Administration",
-    floors: 4,
-    coords: [
-      [12.97205, 77.59395],
-      [12.97205, 77.5943],
-      [12.9718, 77.5943],
-      [12.9718, 77.59395],
-    ],
-  },
-  {
-    id: "B",
-    name: "Building B — Research Wing",
-    use: "R&D Labs",
-    floors: 6,
-    coords: [
-      [12.97205, 77.5944],
-      [12.97205, 77.5948],
-      [12.97175, 77.5948],
-      [12.97175, 77.5944],
-    ],
-  },
-  {
-    id: "C",
-    name: "Building C — Warehouse 3",
-    use: "Storage & Logistics",
-    floors: 1,
-    coords: [
-      [12.9716, 77.59395],
-      [12.9716, 77.5945],
-      [12.9712, 77.5945],
-      [12.9712, 77.59395],
-    ],
-  },
-  {
-    id: "D",
-    name: "Building D — Cafeteria",
-    use: "Dining",
-    floors: 2,
-    coords: [
-      [12.9716, 77.5946],
-      [12.9716, 77.59485],
-      [12.97135, 77.59485],
-      [12.97135, 77.5946],
-    ],
-  },
-  {
-    id: "E",
-    name: "Building E — Data Center",
-    use: "Infrastructure",
-    floors: 2,
-    coords: [
-      [12.9711, 77.594],
-      [12.9711, 77.59425],
-      [12.9708, 77.59425],
-      [12.9708, 77.594],
-    ],
-  },
-  {
-    id: "F",
-    name: "Building F — Visitor Center",
-    use: "Reception",
-    floors: 1,
-    coords: [
-      [12.97225, 77.594],
-      [12.97225, 77.59425],
-      [12.9721, 77.59425],
-      [12.9721, 77.594],
-    ],
-  },
+const BUILDING_DIRECTORY = [
+  { id: "D-01", name: "North Block", use: "Administration" },
+  { id: "D-02", name: "Innovation Hub", use: "Research" },
+  { id: "D-03", name: "Green Court", use: "Recreation" },
+  { id: "D-04", name: "Service Bay", use: "Operations" },
 ];
 
 const STYLE = {
@@ -220,7 +154,7 @@ function AuthScreen() {
 }
 
 function BuildingMap() {
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(BUILDINGS[0]?.id ?? null);
   const [userLocation, setUserLocation] = useState(null); // { lat, lng, accuracy }
   const [status, setStatus] = useState("");
   const mapRef = useRef(null);
@@ -331,6 +265,46 @@ function BuildingMap() {
             ))}
           </div>
 
+          <div className="bm-directory">
+            <div className="bm-directory-header">
+              <h3>Building directory</h3>
+              <p>Backend-ready list. Replace this with your external service data later.</p>
+            </div>
+
+            <ul className="bm-directory-list">
+              {BUILDING_DIRECTORY.map((building) => (
+                <li key={building.id} className="bm-directory-item">
+                  <div className="bm-directory-card">
+                    <span className="bm-row-id">{building.id}</span>
+                    <span>
+                      <strong>{building.name}</strong>
+                      <small>{building.use}</small>
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+
+            <form className="bm-building-form" onSubmit={(event) => event.preventDefault()}>
+              <label>
+                Building name
+                <input type="text" placeholder="New building" />
+              </label>
+
+              <label>
+                Purpose
+                <input type="text" placeholder="Lab, office, parking" />
+              </label>
+
+              <label>
+                Floors
+                <input type="number" min="1" defaultValue="1" />
+              </label>
+
+              <button type="submit" className="bm-locate-btn">Queue for backend</button>
+            </form>
+          </div>
+
           <div className="bm-detail">
             {selectedBuilding ? (
               <>
@@ -339,8 +313,6 @@ function BuildingMap() {
                 <dl>
                   <dt>Use</dt>
                   <dd>{selectedBuilding.use}</dd>
-                  <dt>Floors</dt>
-                  <dd>{selectedBuilding.floors}</dd>
                 </dl>
               </>
             ) : (
