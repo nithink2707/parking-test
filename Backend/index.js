@@ -3,7 +3,7 @@ const cors = require('cors');
 const {Pool} = require('pg');
 const app = express()
 app.use(cors({origin: true,credentials:true}));
-const connectionString = 'postgresql://neondb_owner:npg_OXYTnAdWe85w@ep-holy-brook-b3lq6na9-pooler.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+const connectionString = process.env.DB_KEY
 
 const pool = new Pool({connectionString,});
 
