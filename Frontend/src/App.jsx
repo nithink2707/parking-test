@@ -14,6 +14,7 @@ import {
   CircleMarker,
   Circle,
   useMap,
+  useMapEvents,
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { auth } from "./firebase";
@@ -23,14 +24,6 @@ import "./App.css";
 // Swap these for your real footprints (traced by hand, or pulled from
 // the Overpass API) — everything else keeps working unchanged.
 const CENTER = [12.8407, 77.6763];
-const BUILDINGS = []
-
-const BUILDING_DIRECTORY = [
-  { id: "D-01", name: "North Block", use: "Administration" },
-  { id: "D-02", name: "Innovation Hub", use: "Research" },
-  { id: "D-03", name: "Green Court", use: "Recreation" },
-  { id: "D-04", name: "Service Bay", use: "Operations" },
-];
 
 const STYLE = {
   default: { color: "#5B7CA3", weight: 1.5, fillColor: "#2B3F5C", fillOpacity: 0.45 },
@@ -43,13 +36,32 @@ const STYLE = {
 // map context, so this component just grabs the map instance once).
 function MapController({ onReady }) {
   const map = useMap();
-  useRef(() => onReady(map)).current();
+
+  useEffect(() => {
+    onReady(map);
+  }, [map, onReady]);
   return null;
 }
 
 function BuildingLayer({ building, isSelected, onSelect }) {
   const [hovered, setHovered] = useState(false);
   const style = isSelected ? STYLE.selected : hovered ? STYLE.hover : STYLE.default;
+
+  if (building.location) {
+    return (
+      <CircleMarker
+        center={building.location}
+        radius={8}
+        pathOptions={{
+          color: "#EAF0F6",
+          weight: 2,
+          fillColor: isSelected ? "#E8A33D" : "#5B7CA3",
+          fillOpacity: 1,
+        }}
+        eventHandlers={{ click: () => onSelect(building.id) }}
+      />
+    );
+  }
 
   return (
     <Polygon
@@ -61,6 +73,49 @@ function BuildingLayer({ building, isSelected, onSelect }) {
         click: () => onSelect(building.id),
       }}
     />
+  );
+}
+
+function LocationPickerController({ location, onSelect }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (location) {
+      map.setView(location, 18);
+    }
+  }, [location, map]);
+
+  useMapEvents({
+    click: (event) => onSelect([event.latlng.lat, event.latlng.lng]),
+  });
+
+  return null;
+}
+
+function LocationPickerMap({ location, onSelect }) {
+  return (
+    <div className="bm-picker-map">
+      <MapContainer
+        center={location ?? CENTER}
+        zoom={18}
+        zoomControl={false}
+        style={{ height: "100%", width: "100%" }}
+      >
+        <LocationPickerController location={location} onSelect={onSelect} />
+        <TileLayer
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          maxZoom={20}
+        />
+        {location && (
+          <CircleMarker
+            center={location}
+            radius={7}
+            pathOptions={{ color: "#EAF0F6", weight: 2, fillColor: "#E8A33D", fillOpacity: 1 }}
+          />
+        )}
+      </MapContainer>
+    </div>
   );
 }
 
@@ -153,24 +208,59 @@ function AuthScreen() {
 }
 
 function BuildingMap() {
-  const [selectedId, setSelectedId] = useState(BUILDINGS[0]?.id ?? null);
+  const [buildings, setBuildings] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
   const [userLocation, setUserLocation] = useState(null); // { lat, lng, accuracy }
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState("Loading buildings...");
   const [buildingName, setBuildingName] = useState("");
-  const [location, setLocation] = useState("");
+  const [location, setLocation] = useState(null);
   const mapRef = useRef(null);
 
-  const selectedBuilding = BUILDINGS.find((b) => b.id === selectedId) ?? null;
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadBuildings() {
+      try {
+        const response = await fetch("https://parking-test.onrender.com/api");
+        if (!response.ok) {
+          throw new Error("Could not load buildings.");
+        }
+
+        const data = await response.json();
+        if (!cancelled) {
+          const loadedBuildings = data.map((building, index) => ({
+            ...building,
+            id: building.id ?? `B-${String(index + 1).padStart(2, "0")}`,
+          }));
+          setBuildings(loadedBuildings);
+          setSelectedId(loadedBuildings[0]?.id ?? null);
+          setStatus("");
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setStatus(error.message || "Could not load buildings.");
+        }
+      }
+    }
+
+    loadBuildings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selectedBuilding = buildings.find((b) => b.id === selectedId) ?? null;
 
   const handleSelect = useCallback((id) => {
     setSelectedId(id);
-    const building = BUILDINGS.find((b) => b.id === id);
+    const building = buildings.find((b) => b.id === id);
     const map = mapRef.current;
-    if (map && building) {
+    if (map && building?.coords) {
       const bounds = building.coords;
       map.fitBounds(bounds, { padding: [80, 80], maxZoom: 19 });
     }
-  }, []);
+  }, [buildings]);
 
   const locate = useCallback(() => {
     if (!("geolocation" in navigator)) {
@@ -182,6 +272,7 @@ function BuildingMap() {
       (pos) => {
         const { latitude, longitude, accuracy } = pos.coords;
         setUserLocation({ lat: latitude, lng: longitude, accuracy });
+        setLocation([latitude, longitude]);
         mapRef.current?.setView([latitude, longitude], 18);
         setStatus(`Located within ${Math.round(accuracy)} m.`);
       },
@@ -194,10 +285,9 @@ function BuildingMap() {
 
   async function handleBuildingSubmit(event) {
     event.preventDefault();
-    const coordinates = location.split(",").map((value) => Number(value.trim()));
 
-    if (coordinates.length !== 2 || coordinates.some((value) => !Number.isFinite(value))) {
-      setStatus("Location must contain two numbers, for example: 120, 100.");
+    if (!location) {
+      setStatus("Select a place on the map or use your location first.");
       return;
     }
 
@@ -208,7 +298,7 @@ function BuildingMap() {
         body: JSON.stringify({
           data: {
             name: buildingName.trim(),
-            location: coordinates,
+            location,
           },
         }),
       });
@@ -220,7 +310,7 @@ function BuildingMap() {
 
       setStatus(result.message);
       setBuildingName("");
-      setLocation("");
+      setLocation(null);
     } catch (error) {
       setStatus(error.message || "Could not connect to the backend.");
     }
@@ -258,7 +348,7 @@ function BuildingMap() {
               maxZoom={20}
             />
 
-            {BUILDINGS.map((b) => (
+            {buildings.map((b) => (
               <BuildingLayer
                 key={b.id}
                 building={b}
@@ -288,7 +378,7 @@ function BuildingMap() {
           <div className="bm-status">{status}</div>
 
           <div className="bm-list">
-            {BUILDINGS.map((b) => (
+            {buildings.map((b) => (
               <button
                 key={b.id}
                 className={`bm-row ${b.id === selectedId ? "active" : ""}`}
@@ -307,7 +397,7 @@ function BuildingMap() {
             </div>
 
             <ul className="bm-directory-list">
-              {BUILDING_DIRECTORY.map((building) => (
+              {buildings.map((building) => (
                 <li key={building.id} className="bm-directory-item">
                   <div className="bm-directory-card">
                     <span className="bm-row-id">{building.id}</span>
@@ -332,16 +422,20 @@ function BuildingMap() {
                 />
               </label>
 
-              <label>
-                Location
-                <input
-                  type="text"
-                  placeholder="120, 100"
-                  value={location}
-                  onChange={(event) => setLocation(event.target.value)}
-                  required
-                />
-              </label>
+              <div className="bm-picker-field">
+                <div className="bm-picker-heading">
+                  <span>Location</span>
+                  <button type="button" className="bm-picker-locate" onClick={locate}>
+                    Use my location
+                  </button>
+                </div>
+                <LocationPickerMap location={location} onSelect={setLocation} />
+                <p className="bm-picker-value">
+                  {location
+                    ? `${location[0].toFixed(6)}, ${location[1].toFixed(6)}`
+                    : "Click the map to choose coordinates."}
+                </p>
+              </div>
 
               <button type="submit" className="bm-locate-btn">Add building</button>
             </form>

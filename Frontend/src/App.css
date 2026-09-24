@@ -252,6 +252,49 @@
   font: inherit;
 }
 
+.bm-picker-field {
+  display: grid;
+  gap: 6px;
+}
+
+.bm-picker-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.bm-picker-locate {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--amber);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+
+.bm-picker-map {
+  height: 150px;
+  overflow: hidden;
+  border: 1px solid var(--panel-line);
+  border-radius: 5px;
+}
+
+.bm-picker-map .leaflet-container { background: #0b1420; }
+
+.bm-picker-map .leaflet-tile-pane {
+  filter: saturate(0.5) brightness(0.75) hue-rotate(180deg) invert(1) contrast(0.9);
+}
+
+.bm-picker-value {
+  margin: 0;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+}
+
 .bm-row {
   width: 100%;
   display: flex;

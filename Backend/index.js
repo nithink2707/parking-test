@@ -11,9 +11,13 @@ const pool = new Pool({connectionString,});
 
 
 app.get('/api',async (req,res) => {
-    const records = await pool.query("SELECT data FROM buildings");
-    console.log(records.rows);
-    // res.json({data:records});
+    try {
+        const records = await pool.query("SELECT data FROM buildings");
+        res.json(records.rows.map((record) => record.data));
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({message:'could not load buildings'});
+    }
 })
 
 app.post('/insert',async (req,res) => {
