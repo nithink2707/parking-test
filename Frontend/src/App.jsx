@@ -257,8 +257,9 @@ function BuildingMap() {
     const building = buildings.find((b) => b.id === id);
     const map = mapRef.current;
     if (map && building?.coords) {
-      const bounds = building.coords;
-      map.fitBounds(bounds, { padding: [80, 80], maxZoom: 19 });
+      map.fitBounds(building.coords, { padding: [80, 80], maxZoom: 19 });
+    } else if (map && building?.location) {
+      map.setView(building.location, 18);
     }
   }, [buildings]);
 
