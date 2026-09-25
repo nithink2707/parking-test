@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createUserWithEmailAndPassword,
   GoogleAuthProvider,
@@ -8,123 +8,130 @@ import {
   signOut,
 } from "firebase/auth";
 import {
+  Circle,
+  CircleMarker,
   MapContainer,
   TileLayer,
-  Polygon,
-  CircleMarker,
-  Circle,
+  Tooltip,
   useMap,
-  useMapEvents,
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { auth } from "./firebase";
 import "./App.css";
 
-// ---- Sample data: a small fictional campus, 6 buildings ----
-// Swap these for your real footprints (traced by hand, or pulled from
-// the Overpass API) — everything else keeps working unchanged.
+const APP_NAME = "Ctrl+Park";
+const AUTH_SESSION_KEY = "ctrlpark-authenticated";
 const CENTER = [12.8407, 77.6763];
 
-const STYLE = {
-  default: { color: "#5B7CA3", weight: 1.5, fillColor: "#2B3F5C", fillOpacity: 0.45 },
-  hover: { color: "#8FB4E8", weight: 2, fillColor: "#3C567D", fillOpacity: 0.55 },
-  selected: { color: "#E8A33D", weight: 2.5, fillColor: "#E8A33D", fillOpacity: 0.45 },
-};
+const DESTINATIONS = [
+  {
+    key: "puma-electronic-city",
+    name: "PUMA, Electronic City",
+    subtitle: "Electronic City, Bengaluru",
+    coords: [12.8407, 77.6763],
+    aliases: ["puma", "puma electronic city", "electronic city", "electronic", "ecity", "e city"],
+  },
+];
 
-// Small helper so we can call map.fitBounds() / map.setView() from
-// outside the MapContainer (react-leaflet mounts children inside the
-// map context, so this component just grabs the map instance once).
-function MapController({ onReady }) {
-  const map = useMap();
+const PARKING_SPOTS = [
+  {
+    id: "P-01",
+    title: "Private driveway",
+    address: "Near Electronic City Phase 1",
+    price: 30,
+    distance: "180 m",
+    walk: "2 min",
+    rating: 4.9,
+    type: "Driveway",
+    tags: ["CCTV", "EV charging"],
+    image: "",
+    coords: [12.8402, 77.6754],
+  },
+  {
+    id: "P-02",
+    title: "Apartment visitor bay",
+    address: "Neeladri Road",
+    price: 40,
+    distance: "320 m",
+    walk: "4 min",
+    rating: 4.8,
+    type: "Apartment",
+    tags: ["CCTV", "24/7 access"],
+    image: "",
+    coords: [12.8415, 77.6770],
+  },
+  {
+    id: "P-03",
+    title: "Covered parking",
+    address: "Hosur Road service lane",
+    price: 60,
+    distance: "450 m",
+    walk: "6 min",
+    rating: 4.7,
+    type: "Covered",
+    tags: ["Covered", "CCTV"],
+    image: "",
+    coords: [12.8395, 77.6782],
+  },
+  {
+    id: "P-04",
+    title: "Office parking",
+    address: "Phase 1 Main Road",
+    price: 35,
+    distance: "520 m",
+    walk: "7 min",
+    rating: 4.6,
+    type: "Office",
+    tags: ["CCTV"],
+    image: "",
+    coords: [12.8422, 77.6756],
+  },
+  {
+    id: "P-05",
+    title: "Residential parking",
+    address: "Doddathoguru",
+    price: 25,
+    distance: "650 m",
+    walk: "8 min",
+    rating: 4.9,
+    type: "Residential",
+    tags: ["CCTV", "Well lit"],
+    image: "",
+    coords: [12.8388, 77.6748],
+  },
+];
 
-  useEffect(() => {
-    onReady(map);
-  }, [map, onReady]);
-  return null;
-}
+const LISTING_TAGS = [
+  "CCTV",
+  "EV charging",
+  "Covered",
+  "24/7 access",
+  "Well lit",
+  "Security guard",
+];
 
-function BuildingLayer({ building, isSelected, onSelect }) {
-  const [hovered, setHovered] = useState(false);
-  const style = isSelected ? STYLE.selected : hovered ? STYLE.hover : STYLE.default;
-
-  if (building.location) {
-    return (
-      <CircleMarker
-        center={building.location}
-        radius={8}
-        pathOptions={{
-          color: "#EAF0F6",
-          weight: 2,
-          fillColor: isSelected ? "#E8A33D" : "#5B7CA3",
-          fillOpacity: 1,
-        }}
-        eventHandlers={{ click: () => onSelect(building.id) }}
-      />
-    );
-  }
+function Icon({ name, size = 18, strokeWidth = 1.9 }) {
+  const icons = {
+    search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>,
+    locate: <><circle cx="12" cy="12" r="3" /><circle cx="12" cy="12" r="9" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></>,
+    pin: <><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></>,
+    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+    car: <><path d="m5 11 1.5-4h11l1.5 4" /><path d="M4 11h16v6H4z" /><path d="M7 17v2M17 17v2" /><circle cx="7.5" cy="14" r="1" /><circle cx="16.5" cy="14" r="1" /></>,
+    plus: <path d="M12 5v14M5 12h14" />,
+    minus: <path d="M5 12h14" />,
+    close: <path d="m6 6 12 12M18 6 6 18" />,
+    arrow: <path d="M5 12h13M13 6l6 6-6 6" />,
+    star: <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z" />,
+    user: <><circle cx="12" cy="8" r="3.5" /><path d="M5 21c.7-4 3-6 7-6s6.3 2 7 6" /></>,
+    image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m21 15-5-5L5 20" /></>,
+    check: <path d="m5 12 4 4L19 6" />,
+  };
 
   return (
-    <Polygon
-      positions={building.coords}
-      pathOptions={style}
-      eventHandlers={{
-        mouseover: () => setHovered(true),
-        mouseout: () => setHovered(false),
-        click: () => onSelect(building.id),
-      }}
-    />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {icons[name]}
+    </svg>
   );
-}
-
-function LocationPickerController({ location, onSelect }) {
-  const map = useMap();
-
-  useEffect(() => {
-    if (location) {
-      map.setView(location, 18);
-    }
-  }, [location, map]);
-
-  useMapEvents({
-    click: (event) => onSelect([event.latlng.lat, event.latlng.lng]),
-  });
-
-  return null;
-}
-
-function LocationPickerMap({ location, onSelect }) {
-  return (
-    <div className="bm-picker-map">
-      <MapContainer
-        center={location ?? CENTER}
-        zoom={18}
-        zoomControl={false}
-        style={{ height: "100%", width: "100%" }}
-      >
-        <LocationPickerController location={location} onSelect={onSelect} />
-        <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          maxZoom={20}
-        />
-        {location && (
-          <CircleMarker
-            center={location}
-            radius={7}
-            pathOptions={{ color: "#EAF0F6", weight: 2, fillColor: "#E8A33D", fillOpacity: 1 }}
-          />
-        )}
-      </MapContainer>
-    </div>
-  );
-}
-
-function ProtectedRoute({ user, children }) {
-  if (!user) {
-    return <AuthScreen />;
-  }
-
-  return children;
 }
 
 function AuthScreen() {
@@ -136,6 +143,10 @@ function AuthScreen() {
   async function handleSubmit(event) {
     event.preventDefault();
     setError("");
+    // Mark this as an intentional Ctrl+Park login BEFORE Firebase emits
+    // its auth-state event. Firebase can emit that event before the
+    // sign-in promise resolves.
+    window.sessionStorage.setItem(AUTH_SESSION_KEY, "1");
 
     try {
       if (isRegistering) {
@@ -144,340 +155,431 @@ function AuthScreen() {
         await signInWithEmailAndPassword(auth, email, password);
       }
     } catch {
-      setError("Unable to authenticate. Check your email and password.");
+      window.sessionStorage.removeItem(AUTH_SESSION_KEY);
+      setError("Unable to authenticate. Check your details and try again.");
     }
   }
 
   async function handleGoogleSignIn() {
-    const provider = new GoogleAuthProvider();
+    setError("");
+    // Same reason as the email flow: set the intentional-login marker
+    // before Firebase publishes the authenticated user.
+    window.sessionStorage.setItem(AUTH_SESSION_KEY, "1");
 
     try {
-      await signInWithPopup(auth, provider);
+      await signInWithPopup(auth, new GoogleAuthProvider());
     } catch {
+      window.sessionStorage.removeItem(AUTH_SESSION_KEY);
       setError("Google sign-in failed. Please try again.");
     }
   }
 
   return (
-    <main className="bm-auth">
-      <form className="bm-auth-form" onSubmit={handleSubmit}>
-        <p className="bm-auth-kicker">Campus access</p>
-        <h1>{isRegistering ? "Create account" : "Sign in"}</h1>
+    <main className="auth-page">
+      <section className="auth-card" aria-label={`${APP_NAME} authentication`}>
+        <div className="brand brand-auth">
+          <span className="brand-mark"><Icon name="car" size={18} /></span>
+          <span>{APP_NAME}</span>
+        </div>
 
-        <label>
-          Email
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-        </label>
+        <p className="auth-eyebrow">Parking, without the hassle</p>
+        <h1>{isRegistering ? "Create your account" : "Welcome back"}</h1>
+        <p className="auth-copy">Find a nearby spot, reserve it in seconds, and get where you need to go.</p>
 
-        <label>
-          Password
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            minLength={6}
-            required
-          />
-        </label>
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></label>
+          <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••" autoComplete={isRegistering ? "new-password" : "current-password"} minLength={6} required /></label>
+          {error && <p className="auth-error">{error}</p>}
+          <button className="primary-btn auth-submit" type="submit">{isRegistering ? "Create account" : "Sign in"}<Icon name="arrow" size={16} /></button>
+        </form>
 
-        {error && <p className="bm-auth-error">{error}</p>}
-
-        <button className="bm-locate-btn" type="submit">
-          {isRegistering ? "Create account" : "Sign in"}
+        <div className="or-divider"><span>or</span></div>
+        <button className="google-btn" type="button" onClick={handleGoogleSignIn}>Continue with Google</button>
+        <button className="auth-switch" type="button" onClick={() => setIsRegistering((value) => !value)}>
+          {isRegistering ? "Already have an account? Sign in" : "New to Ctrl+Park? Create an account"}
         </button>
-
-        <button type="button" className="bm-google-btn" onClick={handleGoogleSignIn}>
-          Continue with Google
-        </button>
-
-        <button
-          className="bm-auth-switch"
-          type="button"
-          onClick={() => setIsRegistering((value) => !value)}
-        >
-          {isRegistering ? "Already have an account?" : "Create an account"}
-        </button>
-      </form>
+      </section>
     </main>
   );
 }
 
-function BuildingMap() {
-  const [buildings, setBuildings] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
-  const [userLocation, setUserLocation] = useState(null); // { lat, lng, accuracy }
-  const [status, setStatus] = useState("Loading buildings...");
-  const [buildingName, setBuildingName] = useState("");
-  const [location, setLocation] = useState(null);
+function SpotMarker({ spot, selected, onSelect }) {
+  return (
+    <CircleMarker center={spot.coords} radius={selected ? 10 : 8} pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#111315", fillOpacity: 1 }} eventHandlers={{ click: () => onSelect(spot.id) }}>
+      <Tooltip direction="top" offset={[0, -8]} opacity={1}><strong>₹{spot.price}</strong> · {spot.distance}</Tooltip>
+    </CircleMarker>
+  );
+}
+
+function ListingModal({ onClose, onCreate }) {
+  const [location, setLocation] = useState("");
+  const [price, setPrice] = useState(40);
+  const [type, setType] = useState("Private");
+  const [tags, setTags] = useState([]);
+  const [image, setImage] = useState("");
+  const [listingEnabled, setListingEnabled] = useState(true);
+  const fileRef = useRef(null);
+
+  const toggleTag = (tag) => {
+    setTags((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]);
+  };
+
+  const handleImage = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setImage(String(reader.result));
+    reader.readAsDataURL(file);
+  };
+
+  const submit = (event) => {
+    event.preventDefault();
+    if (!listingEnabled || !location.trim()) return;
+    onCreate({ location: location.trim(), price: Number(price) || 40, type, tags, image });
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <section className="list-space-modal" role="dialog" aria-modal="true" aria-labelledby="list-space-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <span className="modal-eyebrow">Earn with your space</span>
+            <h2 id="list-space-title">List your parking spot</h2>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="Close"><Icon name="close" size={18} /></button>
+        </div>
+
+        <p className="modal-copy">Share an unused driveway, apartment bay, or private spot and earn when someone parks there.</p>
+
+        <form className="listing-fields" onSubmit={submit}>
+          <div className="listing-toggle-row">
+            <div>
+              <strong>Accept parking bookings</strong>
+              <span>Turn this off anytime to stop listing the spot.</span>
+            </div>
+            <button type="button" className={`toggle ${listingEnabled ? "on" : ""}`} onClick={() => setListingEnabled((value) => !value)} aria-pressed={listingEnabled} aria-label="Toggle parking listing">
+              <span />
+            </button>
+          </div>
+
+          <label>Parking location<input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="e.g. 12th Main Road, Electronic City" required /></label>
+
+          <div className="listing-row">
+            <label>Price / hour<input type="number" min="1" value={price} onChange={(event) => setPrice(event.target.value)} placeholder="₹ 40" required /></label>
+            <label>Spot type<select value={type} onChange={(event) => setType(event.target.value)}><option>Private</option><option>Covered</option><option>Apartment</option><option>Office</option><option>Residential</option></select></label>
+          </div>
+
+          <div className="listing-section">
+            <div className="listing-section-head"><div><strong>Parking photo</strong><span>A clear photo helps drivers trust the spot.</span></div><span className="optional">Optional</span></div>
+            <input ref={fileRef} className="hidden-file" type="file" accept="image/*" onChange={handleImage} />
+            {image ? (
+              <button type="button" className="photo-preview" onClick={() => fileRef.current?.click()}>
+                <img src={image} alt="Parking preview" /><span>Change photo</span>
+              </button>
+            ) : (
+              <button type="button" className="photo-upload" onClick={() => fileRef.current?.click()}><span className="upload-icon"><Icon name="image" size={20} /></span><span><strong>Add a parking photo</strong><small>JPG, PNG · one photo is enough</small></span></button>
+            )}
+          </div>
+
+          <div className="listing-section">
+            <div className="listing-section-head"><div><strong>What does your spot offer?</strong><span>Drivers will see these as quick tags.</span></div></div>
+            <div className="tag-grid">
+              {LISTING_TAGS.map((tag) => (
+                <button type="button" key={tag} className={`tag-chip ${tags.includes(tag) ? "active" : ""}`} onClick={() => toggleTag(tag)}>
+                  {tags.includes(tag) && <Icon name="check" size={13} />} {tag}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <button className="primary-btn publish-btn" type="submit" disabled={!listingEnabled || !location.trim()}>{listingEnabled ? "Publish parking spot" : "Listing is off"}<Icon name="arrow" size={16} /></button>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function ParkingApp() {
+  const [parkingSpots, setParkingSpots] = useState(PARKING_SPOTS);
+  const [selectedId, setSelectedId] = useState("P-01");
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("recommended");
+  const [status, setStatus] = useState("");
+  const [userLocation, setUserLocation] = useState(null);
+  const [resultsOpen, setResultsOpen] = useState(true);
+  const [listSpaceOpen, setListSpaceOpen] = useState(false);
+  const [destination, setDestination] = useState(null);
   const mapRef = useRef(null);
 
+  const selected = parkingSpots.find((spot) => spot.id === selectedId) || parkingSpots[0];
+
+  const destinationMatch = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return null;
+    return DESTINATIONS.find((place) => place.aliases.some((alias) => normalized.includes(alias) || alias.includes(normalized))) || null;
+  }, [query]);
+
+  const filteredSpots = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized || destinationMatch) return parkingSpots;
+    const tokens = normalized.split(/\s+/).filter(Boolean);
+    return parkingSpots.filter((spot) => {
+      const searchable = `${spot.title} ${spot.address} ${spot.type} ${spot.tags.join(" ")}`.toLowerCase();
+      return tokens.some((token) => searchable.includes(token));
+    });
+  }, [query, parkingSpots, destinationMatch]);
+
+  const sortedSpots = useMemo(() => {
+    const spots = [...filteredSpots];
+    if (sort === "price") spots.sort((a, b) => a.price - b.price);
+    if (sort === "distance") spots.sort((a, b) => parseInt(a.distance, 10) - parseInt(b.distance, 10));
+    return spots;
+  }, [filteredSpots, sort]);
+
   useEffect(() => {
-    let cancelled = false;
-
-    async function loadBuildings() {
-      try {
-        const response = await fetch("https://parking-test.onrender.com/api");
-        if (!response.ok) {
-          throw new Error("Could not load buildings.");
-        }
-
-        const data = await response.json();
-        if (!cancelled) {
-          const loadedBuildings = data.map((building, index) => ({
-            ...building,
-            id: building.id ?? `B-${String(index + 1).padStart(2, "0")}`,
-          }));
-          setBuildings(loadedBuildings);
-          setSelectedId(loadedBuildings[0]?.id ?? null);
-          setStatus("");
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setStatus(error.message || "Could not load buildings.");
-        }
-      }
+    setDestination(destinationMatch);
+    if (destinationMatch) {
+      mapRef.current?.flyTo(destinationMatch.coords, 16.5, { duration: 0.8 });
+      setResultsOpen(true);
     }
+  }, [destinationMatch]);
 
-    loadBuildings();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const selectedBuilding = buildings.find((b) => b.id === selectedId) ?? null;
-
-  const handleSelect = useCallback((id) => {
+  const selectSpot = useCallback((id) => {
     setSelectedId(id);
-    const building = buildings.find((b) => b.id === id);
-    const map = mapRef.current;
-    if (map && building?.coords) {
-      map.fitBounds(building.coords, { padding: [80, 80], maxZoom: 19 });
-    } else if (map && building?.location) {
-      map.setView(building.location, 18);
+    const spot = parkingSpots.find((item) => item.id === id);
+    if (spot) {
+      setResultsOpen(true);
+      mapRef.current?.flyTo(spot.coords, 17.5, { duration: 0.7 });
     }
-  }, [buildings]);
+  }, [parkingSpots]);
 
   const locate = useCallback(() => {
     if (!("geolocation" in navigator)) {
-      setStatus("Geolocation isn't supported in this browser.");
+      setStatus("Location is not supported by this browser.");
       return;
     }
-    setStatus("Locating…");
+    setStatus("Finding you…");
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude, accuracy } = pos.coords;
+      (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
         setUserLocation({ lat: latitude, lng: longitude, accuracy });
-        setLocation([latitude, longitude]);
-        mapRef.current?.setView([latitude, longitude], 18);
-        setStatus(`Located within ${Math.round(accuracy)} m.`);
+        mapRef.current?.flyTo([latitude, longitude], 16.5, { duration: 0.8 });
+        setStatus(`Located within ${Math.round(accuracy)} m`);
       },
-      (err) => {
-        setStatus(err.code === 1 ? "Location permission denied." : "Couldn't get your location.");
-      },
+      () => setStatus("Could not access your location."),
       { enableHighAccuracy: true, timeout: 10000 }
     );
   }, []);
 
-  async function handleBuildingSubmit(event) {
-    event.preventDefault();
+  const handleCreateListing = ({ location, price, type, tags, image }) => {
+    const newSpot = {
+      id: `P-${String(parkingSpots.length + 1).padStart(2, "0")}`,
+      title: `${type} parking`,
+      address: location,
+      price,
+      distance: "Nearby",
+      walk: "—",
+      rating: 5.0,
+      type,
+      tags,
+      image,
+      coords: [CENTER[0] + (Math.random() - 0.5) * 0.004, CENTER[1] + (Math.random() - 0.5) * 0.004],
+    };
 
-    if (!location) {
-      setStatus("Select a place on the map or use your location first.");
-      return;
-    }
-
-    try {
-      const response = await fetch("https://parking-test.onrender.com/insert", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          data: {
-            name: buildingName.trim(),
-            location,
-          },
-        }),
-      });
-
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.message || "Could not add building.");
-      }
-
-      setStatus(result.message);
-      setBuildingName("");
-      setLocation(null);
-    } catch (error) {
-      setStatus(error.message || "Could not connect to the backend.");
-    }
-  }
+    setParkingSpots((spots) => [newSpot, ...spots]);
+    setSelectedId(newSpot.id);
+    setListSpaceOpen(false);
+    setStatus("Your parking spot is now listed.");
+    setResultsOpen(true);
+    mapRef.current?.flyTo(newSpot.coords, 17.5, { duration: 0.8 });
+  };
 
   return (
-    <div className="bm-app">
-      <header className="bm-header">
-        <div>
-          <h1>Small-Area Campus Map</h1>
-          <p>6 buildings · footprint polygons · click to inspect</p>
+    <div className="ctrl-park-app">
+      <header className="topbar">
+        <div className="brand"><span className="brand-mark"><Icon name="car" size={18} /></span><span>{APP_NAME}</span></div>
+
+        <div className="topbar-search">
+          <Icon name="search" size={17} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search a place, landmark or area…" aria-label="Search a destination" />
+          {query && <button className="clear-btn" type="button" onClick={() => setQuery("")} aria-label="Clear search"><Icon name="close" size={15} /></button>}
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button className="bm-locate-btn" onClick={locate}>
-            Find my location
-          </button>
-          <button className="bm-signout-btn" onClick={() => signOut(auth)}>
-            Sign out
-          </button>
+
+        {query.trim() && (
+          <div className="search-suggestion">
+            <div className="search-suggestion-icon"><Icon name="pin" size={16} /></div>
+            <div><strong>{destination?.name || query}</strong><span>{destination?.subtitle || "Search nearby parking"}</span></div>
+            <span className="search-suggestion-count">{filteredSpots.length} spots</span>
+          </div>
+        )}
+
+        <div className="topbar-actions">
+          <button className="list-space-btn" type="button" onClick={() => setListSpaceOpen(true)}><Icon name="plus" size={16} />List your space</button>
+          <button className="avatar-btn" type="button" onClick={() => { window.sessionStorage.removeItem(AUTH_SESSION_KEY); signOut(auth); }} title="Sign out"><Icon name="user" size={18} /></button>
         </div>
       </header>
 
-      <main className="bm-main">
-        <div className="bm-map">
+      <main className={`workspace ${resultsOpen ? "" : "results-closed"}`}>
+        <section className="map-stage" aria-label="Parking map">
           <MapContainer
             center={CENTER}
-            zoom={18}
+            zoom={16}
             zoomControl={false}
-            style={{ height: "100%", width: "100%" }}
+            className="map"
+            whenReady={(event) => {
+              mapRef.current = event.target;
+            }}
           >
-            <MapController onReady={(map) => (mapRef.current = map)} />
             <TileLayer
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               maxZoom={20}
             />
-
-            {buildings.map((b) => (
-              <BuildingLayer
-                key={b.id}
-                building={b}
-                isSelected={b.id === selectedId}
-                onSelect={handleSelect}
-              />
-            ))}
-
-            {userLocation && (
-              <>
-                <CircleMarker
-                  center={[userLocation.lat, userLocation.lng]}
-                  radius={7}
-                  pathOptions={{ color: "#EAF0F6", weight: 2, fillColor: "#4CC38A", fillOpacity: 1 }}
-                />
-                <Circle
-                  center={[userLocation.lat, userLocation.lng]}
-                  radius={userLocation.accuracy}
-                  pathOptions={{ color: "#4CC38A", weight: 1, fillColor: "#4CC38A", fillOpacity: 0.1 }}
-                />
-              </>
-            )}
+            {parkingSpots.map((spot) => <SpotMarker key={spot.id} spot={spot} selected={spot.id === selectedId} onSelect={selectSpot} />)}
+            {userLocation && <><CircleMarker center={[userLocation.lat, userLocation.lng]} radius={7} pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#3b82f6", fillOpacity: 1 }} /><Circle center={[userLocation.lat, userLocation.lng]} radius={userLocation.accuracy} pathOptions={{ color: "#3b82f6", weight: 1, fillColor: "#3b82f6", fillOpacity: 0.08 }} /></>}
           </MapContainer>
-        </div>
 
-        <aside className="bm-aside">
-          <div className="bm-status">{status}</div>
+          <div className="map-search-mobile"><Icon name="search" size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search a destination" aria-label="Search a destination" /></div>
 
-          <div className="bm-list">
-            {buildings.map((b) => (
-              <button
-                key={b.id}
-                className={`bm-row ${b.id === selectedId ? "active" : ""}`}
-                onClick={() => handleSelect(b.id)}
-              >
-                <span className="bm-row-id">{b.id}</span>
-                <span>{b.name.split("—")[1]?.trim() ?? b.name}</span>
+          <div className="map-controls">
+            <button className="map-control" type="button" onClick={locate} title="Find my location"><Icon name="locate" size={19} /></button>
+            <button className="map-control" type="button" onClick={() => mapRef.current?.zoomIn()} title="Zoom in"><Icon name="plus" size={18} /></button>
+            <button className="map-control" type="button" onClick={() => mapRef.current?.zoomOut()} title="Zoom out"><Icon name="minus" size={18} /></button>
+          </div>
+
+          <div className="map-context"><div className="context-pin"><Icon name="pin" size={17} /></div><div><span>Parking near</span><strong>{destination?.name || "Electronic City, Bengaluru"}</strong></div></div>
+          {!resultsOpen && <button className="show-results-btn" type="button" onClick={() => setResultsOpen(true)}>Show parking <span>{filteredSpots.length}</span><Icon name="arrow" size={15} /></button>}
+          {status && <div className="map-status">{status}</div>}
+        </section>
+
+        <aside className={`results-panel ${resultsOpen ? "" : "results-hidden"}`}>
+          <div className="results-head">
+            <div><p className="results-kicker">Available nearby</p><h1>{filteredSpots.length} parking spots</h1></div>
+            <button className="mobile-close" type="button" onClick={() => setResultsOpen(false)} aria-label="Close available nearby"><Icon name="close" /></button>
+          </div>
+
+          <div className="results-toolbar">
+            <div className="result-filter"><Icon name="car" size={15} /><span>Any vehicle</span></div>
+            <select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort parking"><option value="recommended">Recommended</option><option value="distance">Closest</option><option value="price">Lowest price</option></select>
+          </div>
+
+          <div className="spot-list">
+            {sortedSpots.map((spot) => (
+              <button key={spot.id} className={`spot-card ${spot.id === selectedId ? "selected" : ""}`} type="button" onClick={() => selectSpot(spot.id)}>
+                <div className="spot-thumb">
+                  {spot.image ? <img src={spot.image} alt="Parking spot" /> : <Icon name="car" size={23} />}
+                  <span>OPEN</span>
+                </div>
+                <div className="spot-main">
+                  <div className="spot-topline"><span className="spot-title">{spot.title}</span><span className="spot-price">₹{spot.price}<small>/hr</small></span></div>
+                  <p className="spot-address">{spot.address}</p>
+                  <div className="spot-meta"><span><Icon name="star" size={13} /> {spot.rating}</span><span><Icon name="pin" size={13} /> {spot.distance}</span><span><Icon name="clock" size={13} /> {spot.walk}</span></div>
+                  {spot.tags?.length > 0 && <div className="spot-tags">{spot.tags.slice(0, 3).map((tag) => <span key={tag}>{tag}</span>)}</div>}
+                </div>
               </button>
             ))}
+            {filteredSpots.length === 0 && <div className="empty-state"><div className="empty-icon"><Icon name="search" size={20} /></div><strong>No spots found</strong><p>Try another destination or clear your search.</p></div>}
           </div>
 
-          <div className="bm-directory">
-            <div className="bm-directory-header">
-              <h3>Building directory</h3>
-              <p>Backend-ready list. Replace this with your external service data later.</p>
-            </div>
-
-            <ul className="bm-directory-list">
-              {buildings.map((building) => (
-                <li key={building.id} className="bm-directory-item">
-                  <div className="bm-directory-card">
-                    <span className="bm-row-id">{building.id}</span>
-                    <span>
-                      <strong>{building.name}</strong>
-                      <small>{building.use}</small>
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-
-            <form className="bm-building-form" onSubmit={handleBuildingSubmit}>
-              <label>
-                Building name
-                <input
-                  type="text"
-                  placeholder="New building"
-                  value={buildingName}
-                  onChange={(event) => setBuildingName(event.target.value)}
-                  required
-                />
-              </label>
-
-              <div className="bm-picker-field">
-                <div className="bm-picker-heading">
-                  <span>Location</span>
-                  <button type="button" className="bm-picker-locate" onClick={locate}>
-                    Use my location
-                  </button>
-                </div>
-                <LocationPickerMap location={location} onSelect={setLocation} />
-                <p className="bm-picker-value">
-                  {location
-                    ? `${location[0].toFixed(6)}, ${location[1].toFixed(6)}`
-                    : "Click the map to choose coordinates."}
-                </p>
-              </div>
-
-              <button type="submit" className="bm-locate-btn">Add building</button>
-            </form>
-          </div>
-
-          <div className="bm-detail">
-            {selectedBuilding ? (
-              <>
-                <div className="bm-detail-id">{selectedBuilding.id}</div>
-                <h2>{selectedBuilding.name}</h2>
-                <dl>
-                  <dt>Use</dt>
-                  <dd>{selectedBuilding.use}</dd>
-                </dl>
-              </>
-            ) : (
-              <p className="bm-placeholder">
-                Click a building on the map, or pick one from the list above, to see its details here.
-              </p>
-            )}
-          </div>
+          {selected && resultsOpen && <div className="selected-drawer"><div className="drawer-line"><div><span className="drawer-label">Your selected spot</span><strong>{selected.title}</strong></div><div className="drawer-price">₹{selected.price}<small>/hr</small></div></div><button className="primary-btn reserve-btn" type="button" onClick={() => setStatus(`${selected.title} selected — ready to reserve.`)}>Reserve spot <Icon name="arrow" size={16} /></button></div>}
         </aside>
+
+        {listSpaceOpen && <ListingModal onClose={() => setListSpaceOpen(false)} onCreate={handleCreateListing} />}
       </main>
     </div>
   );
 }
 
-export default function App() {
-  const [user, setUser] = useState(undefined);
-
-  useEffect(() => {
-    return onAuthStateChanged(auth, setUser);
-  }, []);
-
-  if (user === undefined) {
-    return null;
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
   }
 
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error) {
+    console.error("Ctrl+Park render error:", error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <main className="app-error-screen">
+          <div className="app-error-card">
+            <div className="brand">
+              <span className="brand-mark"><Icon name="car" size={18} /></span>
+              <span>Ctrl+Park</span>
+            </div>
+            <h1>Something went wrong</h1>
+            <p>The parking screen could not be loaded. Refresh the page and try again.</p>
+            <button className="primary-btn" type="button" onClick={() => window.location.reload()}>
+              Refresh Ctrl+Park
+            </button>
+            <small>{this.state.error?.message || "Unknown rendering error"}</small>
+          </div>
+        </main>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function AppContent() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (!active) return;
+
+      const hasCtrlParkSession =
+        window.sessionStorage.getItem(AUTH_SESSION_KEY) === "1";
+
+      if (firebaseUser && hasCtrlParkSession) {
+        setUser(firebaseUser);
+        setAuthLoading(false);
+        return;
+      }
+
+      if (firebaseUser && !hasCtrlParkSession) {
+        setUser(null);
+        setAuthLoading(false);
+        signOut(auth).catch((error) => {
+          console.error("Ctrl+Park automatic sign-out failed:", error);
+        });
+        return;
+      }
+
+      setUser(null);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+
+  if (authLoading) {
+    return (
+      <div className="loading-screen">
+        <span className="loading-mark"><Icon name="car" size={18} /></span>
+      </div>
+    );
+  }
+
+  return user ? <ParkingApp /> : <AuthScreen />;
+}
+
+export default function App() {
   return (
-    <ProtectedRoute user={user}>
-      <BuildingMap />
-    </ProtectedRoute>
+    <AppErrorBoundary>
+      <AppContent />
+    </AppErrorBoundary>
   );
 }
