@@ -22,6 +22,7 @@ app.get('/api',async (req,res) => {
                 b.fare,
                 b.type,
                 b.tags,
+                b.slots,
                 COALESCE(
                     json_agg(
                         json_build_object(
@@ -31,7 +32,7 @@ app.get('/api',async (req,res) => {
                         ) ORDER BY s.slot_number
                     ) FILTER (WHERE s.id IS NOT NULL),
                     '[]'::json
-                ) AS slots
+                ) AS parking_slots
             FROM buildings b
             LEFT JOIN parking_slots s ON s.building_id = b.id
             GROUP BY b.id
@@ -58,11 +59,11 @@ app.post('/insert',async (req,res) => {
         typeof rec.type !== 'string' ||
         !Array.isArray(rec.tags) ||
         !rec.tags.every((tag) => typeof tag === 'string') ||
-        !Number.isInteger(rec.slot_count) ||
-        rec.slot_count < 1
+        !Number.isInteger(rec.slots) ||
+        rec.slots < 1
     ) {
         return res.status(400).json({
-            message: 'data must include name, location, fare, type, tags, and a positive slot_count',
+            message: 'data must include name, location, fare, type, tags, and a positive slots value',
         });
     }
 
@@ -71,17 +72,17 @@ app.post('/insert',async (req,res) => {
         await client.query('BEGIN');
 
         const building = await client.query(
-            `INSERT INTO buildings (name, location, fare, type, tags)
-             VALUES ($1, $2::jsonb, $3, $4, $5)
-             RETURNING id`,
-            [rec.name, rec.location, rec.fare, rec.type, rec.tags]
+            `INSERT INTO buildings (name, location, fare, type, tags, slots)
+             VALUES ($1, $2::jsonb, $3, $4, $5, $6)
+             RETURNING id, slots`,
+            [rec.name, rec.location, rec.fare, rec.type, rec.tags, rec.slots]
         );
 
         await client.query(
             `INSERT INTO parking_slots (building_id, slot_number, vacant)
              SELECT $1, slot_number, true
              FROM generate_series(1, $2) AS slot_number`,
-            [building.rows[0].id, rec.slot_count]
+            [building.rows[0].id, building.rows[0].slots]
         );
 
         await client.query('COMMIT');
