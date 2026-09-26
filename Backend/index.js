@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const {Pool} = require('pg');
 const app = express()
-app.use(express.json());
+app.use(express.json({limit: '15mb'}));
 app.use(cors({origin: true,credentials:true}));
 const connectionString = process.env.DB_KEY
 
@@ -23,6 +23,7 @@ app.get('/api',async (req,res) => {
                 b.type,
                 b.tags,
                 b.slots,
+                b.image,
                 COALESCE(
                     json_agg(
                         json_build_object(
@@ -61,6 +62,7 @@ app.get('/api/users/:userId/buildings', async (req,res) => {
                 b.type,
                 b.tags,
                 b.slots,
+                b.image,
                 COALESCE(
                     json_agg(
                         json_build_object(
@@ -87,7 +89,6 @@ app.get('/api/users/:userId/buildings', async (req,res) => {
 
 app.post('/insert',async (req,res) => {
     const rec = req.body.data;
-    console.log(rec);
     if (
         !rec ||
         typeof rec.name !== 'string' ||
@@ -101,7 +102,8 @@ app.post('/insert',async (req,res) => {
         !Array.isArray(rec.tags) ||
         !rec.tags.every((tag) => typeof tag === 'string') ||
         !Number.isInteger(rec.slots) ||
-        rec.slots < 1
+        rec.slots < 1 ||
+        (rec.image != null && (typeof rec.image !== 'string' || rec.image.length > 14 * 1024 * 1024))
     ) {
         return res.status(400).json({
             message: 'data must include name, location, fare, type, tags, and a positive slots value',
@@ -113,10 +115,10 @@ app.post('/insert',async (req,res) => {
         await client.query('BEGIN');
 
         const building = await client.query(
-            `INSERT INTO buildings (name, location, fare, type, tags, slots, userid)
-             VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7)
+            `INSERT INTO buildings (name, location, fare, type, tags, slots, userid, image)
+             VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, $8)
              RETURNING id, slots`,
-            [rec.name, rec.location, rec.fare, rec.type, rec.tags, rec.slots, rec.userid]
+            [rec.name, rec.location, rec.fare, rec.type, rec.tags, rec.slots, rec.userid, rec.image ?? null]
         );
 
         await client.query(

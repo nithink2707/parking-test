@@ -1,0 +1,2 @@
+ALTER TABLE buildings
+    ADD COLUMN IF NOT EXISTS image TEXT;

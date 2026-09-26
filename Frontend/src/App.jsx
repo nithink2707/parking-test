@@ -435,6 +435,11 @@ function ListingModal({ onClose, onCreate }) {
   const handleImage = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      alert("Choose an image smaller than 10 MB.");
+      event.target.value = "";
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => setImage(String(reader.result));
     reader.readAsDataURL(file);
@@ -1185,7 +1190,7 @@ function ParkingApp({ user }) {
     );
   }, []);
 
-  const handleCreateListing = async ({name, location, price, type, tags, slots }) => {
+  const handleCreateListing = async ({name, location, price, type, tags, slots, image }) => {
     try {
       const response = await fetch(`${API_BASE_URL}/insert`, {
         method: "POST",
@@ -1199,6 +1204,7 @@ function ParkingApp({ user }) {
             tags,
             slots: slots,
             userid: user.uid,
+            image,
           },
         }),
       });
@@ -1542,7 +1548,7 @@ function ParkingApp({ user }) {
               const spot = parkingSpots.find((item) => item.buildingId === building.id);
               return (
                 <button key={building.id} className="spot-card" type="button" onClick={() => spot && selectSpot(spot.id)}>
-                  <div className="spot-thumb"><Icon name="car" size={23} /><span>{building.slots} SLOTS</span></div>
+                  <div className="spot-thumb">{building.image ? <img className="spot-thumb-image" src={building.image} alt={`${building.name} parking`} /> : <Icon name="car" size={23} />}<span>{building.slots} SLOTS</span></div>
                   <div className="spot-main">
                     <div className="spot-topline"><span className="spot-title">{building.name}</span><span className="spot-price">₹{building.fare}<small>/hr</small></span></div>
                     <p className="spot-address">{building.type} parking</p>
