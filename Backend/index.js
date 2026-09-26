@@ -45,6 +45,45 @@ app.get('/api',async (req,res) => {
     }
 })
 
+app.get('/api/users/:userId/buildings', async (req,res) => {
+    const userId = req.params.userId;
+    if (!userId || !userId.trim()) {
+        return res.status(400).json({message:'userId is required'});
+    }
+
+    try {
+        const records = await pool.query(`
+            SELECT
+                b.id,
+                b.name,
+                b.location,
+                b.fare,
+                b.type,
+                b.tags,
+                b.slots,
+                COALESCE(
+                    json_agg(
+                        json_build_object(
+                            'id', s.id,
+                            'slot_number', s.slot_number,
+                            'vacant', s.vacant
+                        ) ORDER BY s.slot_number
+                    ) FILTER (WHERE s.id IS NOT NULL),
+                    '[]'::json
+                ) AS parking_slots
+            FROM buildings b
+            LEFT JOIN parking_slots s ON s.building_id = b.id
+            WHERE b.userid = $1
+            GROUP BY b.id
+            ORDER BY b.id
+        `, [userId]);
+        res.json(records.rows);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({message:'could not load user buildings'});
+    }
+})
+
 
 app.post('/insert',async (req,res) => {
     const rec = req.body.data;
@@ -52,6 +91,8 @@ app.post('/insert',async (req,res) => {
     if (
         !rec ||
         typeof rec.name !== 'string' ||
+        typeof rec.userid !== 'string' ||
+        !rec.userid.trim() ||
         !rec.location ||
         typeof rec.location !== 'object' ||
         Array.isArray(rec.location) ||
@@ -72,10 +113,10 @@ app.post('/insert',async (req,res) => {
         await client.query('BEGIN');
 
         const building = await client.query(
-            `INSERT INTO buildings (name, location, fare, type, tags, slots)
-             VALUES ($1, $2::jsonb, $3, $4, $5, $6)
+            `INSERT INTO buildings (name, location, fare, type, tags, slots, userid)
+             VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7)
              RETURNING id, slots`,
-            [rec.name, rec.location, rec.fare, rec.type, rec.tags, rec.slots]
+            [rec.name, rec.location, rec.fare, rec.type, rec.tags, rec.slots, rec.userid]
         );
 
         await client.query(
@@ -156,7 +197,8 @@ app.post('/booking', async (req,res) => {
     const {start_time: startTime, end_time: endTime} = booking || {};
 
     if (
-        userId == null ||
+        typeof userId !== 'string' ||
+        !userId.trim() ||
         !Number.isInteger(slotId) ||
         slotId < 1 ||
         !isValidDate(startTime)
@@ -201,7 +243,7 @@ app.post('/booking', async (req,res) => {
 
         const created = await client.query(
             `INSERT INTO bookings (user_id, slot_id, start_time, status, created_at)
-             VALUES ($1, $2, $3, 'confirmed', NOW())
+             VALUES ($1, $2, $3::timestamptz, 'confirmed', NOW())
              RETURNING id, user_id, slot_id, start_time, end_time, status, created_at`,
             [userId, slotId, startTime]
         );
@@ -268,6 +310,10 @@ app.patch('/booking/:bookingId/end', async (req,res) => {
         client.release();
     }
 })
+
+app.use((req, res) => {
+    res.status(404).json({message:'route not found'});
+});
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

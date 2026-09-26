@@ -24,15 +24,29 @@ const AUTH_SESSION_KEY = "ctrlpark-authenticated";
 const API_BASE_URL = import.meta.env.VITE_API_URL || "https://parking-test.onrender.com";
 const CENTER = [12.8407, 77.6763];
 
-const DESTINATIONS = [
-  {
-    key: "puma-electronic-city",
-    name: "PUMA, Electronic City",
-    subtitle: "Electronic City, Bengaluru",
-    coords: [12.8407, 77.6763],
-    aliases: ["puma", "puma electronic city", "electronic city", "electronic", "ecity", "e city"],
-  },
-];
+async function readApiJson(response, fallbackMessage) {
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      `${fallbackMessage} The API returned a non-JSON response (HTTP ${response.status}); check the API URL and backend route deployment.`
+    );
+  }
+
+  if (!response.ok) throw new Error(data.message || fallbackMessage);
+  return data;
+}
+
+// const DESTINATIONS = [
+//   {
+//     key: "puma-electronic-city",
+//     name: "PUMA, Electronic City",
+//     subtitle: "Electronic City, Bengaluru",
+//     coords: [12.8407, 77.6763],
+//     aliases: ["puma", "puma electronic city", "electronic city", "electronic", "ecity", "e city"],
+//   },
+// ];
 
 // const PARKING_SPOTS = [
 //   {
@@ -126,6 +140,7 @@ function Icon({ name, size = 18, strokeWidth = 1.9 }) {
     user: <><circle cx="12" cy="8" r="3.5" /><path d="M5 21c.7-4 3-6 7-6s6.3 2 7 6" /></>,
     image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m21 15-5-5L5 20" /></>,
     check: <path d="m5 12 4 4L19 6" />,
+    logout: <><path d="M10 17l5-5-5-5" /><path d="M15 12H3" /><path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6" /></>,
   };
 
   return (
@@ -218,10 +233,8 @@ function BuildingDataLoader({ setParkingSpots, refreshKey, onError }) {
 
     async function loadBuildings() {
       try {
-        const response = await fetch(`https://parking-test.onrender.com/api`);
-        if (!response.ok) throw new Error("Could not load parking buildings.");
-
-        const buildings = await response.json();
+        const response = await fetch(`${API_BASE_URL}/api`);
+        const buildings = await readApiJson(response, "Could not load parking buildings.");
         if (!active) return;
 
         setParkingSpots(buildings.filter((building) => building.name && building.location).map((building) => {
@@ -235,6 +248,7 @@ function BuildingDataLoader({ setParkingSpots, refreshKey, onError }) {
 
           return {
             id: `building-${building.id}`,
+            buildingId: building.id,
             title: building.name,
             address,
             price: building.fare,
@@ -244,6 +258,7 @@ function BuildingDataLoader({ setParkingSpots, refreshKey, onError }) {
             type: building.type,
             tags: building.tags || [],
             image: building.image || "",
+            parkingSlots: building.parking_slots || [],
             coords,
           };
         }));
@@ -275,6 +290,58 @@ function LocationPicker({ coordinates, onSelect }) {
       pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#1e6b4d", fillOpacity: 1 }}
     />
   ) : null;
+}
+
+function AccountMenu({ onShowListings, onSignOut }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const closeOnOutsideClick = (event) => {
+      if (!menuRef.current?.contains(event.target)) setIsOpen(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setIsOpen(false);
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isOpen]);
+
+  return (
+    <div className="account-menu" ref={menuRef}>
+      <button
+        className="avatar-btn"
+        type="button"
+        onClick={() => setIsOpen((open) => !open)}
+        aria-label="Open account menu"
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        title="Account menu"
+      >
+        <Icon name="user" size={18} />
+      </button>
+      {isOpen && (
+        <div className="account-menu-popover" role="menu" aria-label="Account options">
+          <button type="button" role="menuitem" onClick={() => { setIsOpen(false); onShowListings(); }}>
+            <Icon name="car" size={16} />
+            <span>My listings</span>
+          </button>
+          <span className="account-menu-divider" />
+          <button type="button" role="menuitem" onClick={() => { setIsOpen(false); onSignOut(); }}>
+            <Icon name="logout" size={16} />
+            <span>Log out</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ListingModal({ onClose, onCreate }) {
@@ -390,7 +457,7 @@ function ListingModal({ onClose, onCreate }) {
   );
 }
 
-function ParkingApp() {
+function ParkingApp({ user }) {
   const [parkingSpots, setParkingSpots] = useState([]);
   const [selectedId, setSelectedId] = useState("P-01");
   const [query, setQuery] = useState("");
@@ -399,6 +466,11 @@ function ParkingApp() {
   const [userLocation, setUserLocation] = useState(null);
   const [resultsOpen, setResultsOpen] = useState(true);
   const [listSpaceOpen, setListSpaceOpen] = useState(false);
+  const [activePanel, setActivePanel] = useState("nearby");
+  const [myListings, setMyListings] = useState([]);
+  const [myListingsLoading, setMyListingsLoading] = useState(false);
+  const [myListingsError, setMyListingsError] = useState("");
+  const [listingsRefreshKey, setListingsRefreshKey] = useState(0);
   const [destination, setDestination] = useState(null);
   const [buildingsRefreshKey, setBuildingsRefreshKey] = useState(0);
   const mapRef = useRef(null);
@@ -442,6 +514,29 @@ function ParkingApp() {
     }
   }, [parkingSpots, selectedId]);
 
+  useEffect(() => {
+    if (activePanel !== "mine") return undefined;
+
+    let active = true;
+
+    async function loadMyListings() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(user.uid)}/buildings`);
+        const buildings = await readApiJson(response, "Could not load your listings.");
+        if (active) setMyListings(buildings);
+      } catch (error) {
+        if (active) setMyListingsError(error.message);
+      } finally {
+        if (active) setMyListingsLoading(false);
+      }
+    }
+
+    loadMyListings();
+    return () => {
+      active = false;
+    };
+  }, [activePanel, listingsRefreshKey, user.uid]);
+
   const selectSpot = useCallback((id) => {
     setSelectedId(id);
     const spot = parkingSpots.find((item) => item.id === id);
@@ -450,6 +545,14 @@ function ParkingApp() {
       mapRef.current?.flyTo(spot.coords, 17.5, { duration: 0.7 });
     }
   }, [parkingSpots]);
+
+  const showMyListings = () => {
+    setActivePanel("mine");
+    setResultsOpen(true);
+    setMyListingsLoading(true);
+    setMyListingsError("");
+    setListingsRefreshKey((value) => value + 1);
+  };
 
   const locate = useCallback(() => {
     if (!("geolocation" in navigator)) {
@@ -471,7 +574,7 @@ function ParkingApp() {
 
   const handleCreateListing = async ({name, location, price, type, tags, slots }) => {
     try {
-      const response = await fetch(`https://parking-test.onrender.com/insert`, {
+      const response = await fetch(`${API_BASE_URL}/insert`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -482,17 +585,50 @@ function ParkingApp() {
             type,
             tags,
             slots: slots,
+            userid: user.uid,
           },
         }),
       });
 
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.message || "Could not list your parking spot.");
+      await readApiJson(response, "Could not list your parking spot.");
 
       setListSpaceOpen(false);
       setStatus("Your parking spot is now listed.");
       setBuildingsRefreshKey((value) => value + 1);
+      if (activePanel === "mine") {
+        setMyListingsLoading(true);
+        setMyListingsError("");
+      }
+      setListingsRefreshKey((value) => value + 1);
       setResultsOpen(true);
+    } catch (error) {
+      setStatus(error.message);
+    }
+  };
+
+  const handleReserve = async () => {
+    const availableSlot = selected?.parkingSlots?.find((slot) => slot.vacant);
+    if (!availableSlot) {
+      setStatus("No parking slots are currently available.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/booking`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          data: {
+            user_id: user.uid,
+            slot_id: availableSlot.id,
+            start_time: new Date().toISOString(),
+          },
+        }),
+      });
+      await readApiJson(response, "Could not reserve this parking spot.");
+
+      setStatus(`${selected.title} reserved successfully.`);
+      setBuildingsRefreshKey((value) => value + 1);
     } catch (error) {
       setStatus(error.message);
     }
@@ -520,7 +656,10 @@ function ParkingApp() {
 
         <div className="topbar-actions">
           <button className="list-space-btn" type="button" onClick={() => setListSpaceOpen(true)}><Icon name="plus" size={16} />List your space</button>
-          <button className="avatar-btn" type="button" onClick={() => { window.sessionStorage.removeItem(AUTH_SESSION_KEY); signOut(auth); }} title="Sign out"><Icon name="user" size={18} /></button>
+          <AccountMenu
+            onShowListings={showMyListings}
+            onSignOut={() => { window.sessionStorage.removeItem(AUTH_SESSION_KEY); signOut(auth); }}
+          />
         </div>
       </header>
 
@@ -559,17 +698,22 @@ function ParkingApp() {
 
         <aside className={`results-panel ${resultsOpen ? "" : "results-hidden"}`}>
           <div className="results-head">
-            <div><p className="results-kicker">Available nearby</p><h1>{filteredSpots.length} parking spots</h1></div>
+            <div><p className="results-kicker">{activePanel === "nearby" ? "Available nearby" : "Your spaces"}</p><h1>{activePanel === "nearby" ? `${filteredSpots.length} parking spots` : "Your listed buildings"}</h1></div>
             <button className="mobile-close" type="button" onClick={() => setResultsOpen(false)} aria-label="Close available nearby"><Icon name="close" /></button>
           </div>
 
-          <div className="results-toolbar">
-            <div className="result-filter"><Icon name="car" size={15} /><span>Any vehicle</span></div>
-            <select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort parking"><option value="recommended">Recommended</option><option value="distance">Closest</option><option value="price">Lowest price</option></select>
+          <div className="panel-tabs" role="tablist" aria-label="Parking views">
+            <button type="button" role="tab" aria-selected={activePanel === "nearby"} className={activePanel === "nearby" ? "active" : ""} onClick={() => setActivePanel("nearby")}>Nearby</button>
+            <button type="button" role="tab" aria-selected={activePanel === "mine"} className={activePanel === "mine" ? "active" : ""} onClick={showMyListings}>My listings</button>
           </div>
 
+          {activePanel === "nearby" && <div className="results-toolbar">
+            <div className="result-filter"><Icon name="car" size={15} /><span>Any vehicle</span></div>
+            <select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort parking"><option value="recommended">Recommended</option><option value="distance">Closest</option><option value="price">Lowest price</option></select>
+          </div>}
+
           <div className="spot-list">
-            {sortedSpots.map((spot) => (
+            {activePanel === "nearby" && sortedSpots.map((spot) => (
               <button key={spot.id} className={`spot-card ${spot.id === selectedId ? "selected" : ""}`} type="button" onClick={() => selectSpot(spot.id)}>
                 <div className="spot-thumb">
                   {spot.image ? <img src={spot.image} alt="Parking spot" /> : <Icon name="car" size={23} />}
@@ -583,10 +727,27 @@ function ParkingApp() {
                 </div>
               </button>
             ))}
-            {filteredSpots.length === 0 && <div className="empty-state"><div className="empty-icon"><Icon name="search" size={20} /></div><strong>No spots found</strong><p>Try another destination or clear your search.</p></div>}
+            {activePanel === "mine" && myListings.map((building) => {
+              const spot = parkingSpots.find((item) => item.buildingId === building.id);
+              return (
+                <button key={building.id} className="spot-card" type="button" onClick={() => spot && selectSpot(spot.id)}>
+                  <div className="spot-thumb"><Icon name="car" size={23} /><span>{building.slots} SLOTS</span></div>
+                  <div className="spot-main">
+                    <div className="spot-topline"><span className="spot-title">{building.name}</span><span className="spot-price">₹{building.fare}<small>/hr</small></span></div>
+                    <p className="spot-address">{building.type} parking</p>
+                    <div className="spot-meta"><span>{building.parking_slots?.filter((slot) => slot.vacant).length ?? 0} available</span></div>
+                    {building.tags?.length > 0 && <div className="spot-tags">{building.tags.slice(0, 3).map((tag) => <span key={tag}>{tag}</span>)}</div>}
+                  </div>
+                </button>
+              );
+            })}
+            {activePanel === "nearby" && filteredSpots.length === 0 && <div className="empty-state"><div className="empty-icon"><Icon name="search" size={20} /></div><strong>No spots found</strong><p>Try another destination or clear your search.</p></div>}
+            {activePanel === "mine" && myListingsLoading && <div className="empty-state"><strong>Loading your listings…</strong></div>}
+            {activePanel === "mine" && myListingsError && <div className="empty-state"><strong>Could not load listings</strong><p>{myListingsError}</p></div>}
+            {activePanel === "mine" && !myListingsLoading && !myListingsError && myListings.length === 0 && <div className="empty-state"><div className="empty-icon"><Icon name="car" size={20} /></div><strong>No buildings listed yet</strong><p>Your parking spaces will appear here.</p></div>}
           </div>
 
-          {selected && resultsOpen && <div className="selected-drawer"><div className="drawer-line"><div><span className="drawer-label">Your selected spot</span><strong>{selected.title}</strong></div><div className="drawer-price">₹{selected.price}<small>/hr</small></div></div><button className="primary-btn reserve-btn" type="button" onClick={() => setStatus(`${selected.title} selected — ready to reserve.`)}>Reserve spot <Icon name="arrow" size={16} /></button></div>}
+          {activePanel === "nearby" && selected && resultsOpen && <div className="selected-drawer"><div className="drawer-line"><div><span className="drawer-label">Your selected spot</span><strong>{selected.title}</strong></div><div className="drawer-price">₹{selected.price}<small>/hr</small></div></div><button className="primary-btn reserve-btn" type="button" onClick={handleReserve} disabled={!selected.parkingSlots?.some((slot) => slot.vacant)}>Reserve spot <Icon name="arrow" size={16} /></button></div>}
         </aside>
 
         {listSpaceOpen && <ListingModal onClose={() => setListSpaceOpen(false)} onCreate={handleCreateListing} />}
@@ -678,7 +839,7 @@ function AppContent() {
     );
   }
 
-  return user ? <ParkingApp /> : <AuthScreen />;
+  return user ? <ParkingApp user={user} /> : <AuthScreen />;
 }
 
 export default function App() {
