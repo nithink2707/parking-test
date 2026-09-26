@@ -1324,6 +1324,7 @@ function ParkingApp({ user }) {
       });
       await readApiJson(response, "Could not reserve this parking spot.");
 
+      setBookingModalOpen(false);
       setBuildingDetailsOpen(false);
       setStatus(`${selected.title} reserved successfully.`);
       setIsBuildingsLoading(true);
