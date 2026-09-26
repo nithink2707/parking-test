@@ -838,6 +838,65 @@ function BuildingMiniMap({ coords, title }) {
   );
 }
 
+function toLocalDateTimeValue(date) {
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 16);
+}
+
+function BookingTimeModal({ spot, onClose, onReserve, reserving }) {
+  const initialStart = new Date();
+  initialStart.setMinutes(Math.ceil(initialStart.getMinutes() / 15) * 15, 0, 0);
+  const [startTime, setStartTime] = useState(toLocalDateTimeValue(initialStart));
+  const [endTime, setEndTime] = useState(toLocalDateTimeValue(new Date(initialStart.getTime() + 60 * 60 * 1000)));
+  const [error, setError] = useState("");
+
+  const submit = async (event) => {
+    event.preventDefault();
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+
+    if (start < new Date()) {
+      setError("Choose a start time in the future.");
+      return;
+    }
+    if (end <= start) {
+      setError("The end time must be after the start time.");
+      return;
+    }
+
+    setError("");
+    try {
+      await onReserve({ startTime: start.toISOString(), endTime: end.toISOString() });
+    } catch (reserveError) {
+      setError(reserveError.message || "Could not reserve this parking spot.");
+    }
+  };
+
+  return (
+    <div className="modal-backdrop booking-modal-backdrop" onMouseDown={onClose}>
+      <section className="booking-time-modal" role="dialog" aria-modal="true" aria-labelledby="booking-time-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <span className="modal-eyebrow">Reserve your space</span>
+            <h2 id="booking-time-title">Choose your parking time</h2>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="Close"><Icon name="close" size={18} /></button>
+        </div>
+        <p className="booking-time-copy">{spot.title} · ₹{spot.price} per hour</p>
+        <form className="booking-time-form" onSubmit={submit}>
+          <label>Start time<input type="datetime-local" value={startTime} min={toLocalDateTimeValue(new Date())} onChange={(event) => setStartTime(event.target.value)} required /></label>
+          <label>End time<input type="datetime-local" value={endTime} min={startTime} onChange={(event) => setEndTime(event.target.value)} required /></label>
+          {error && <p className="booking-time-error" role="alert">{error}</p>}
+          <button className="primary-btn booking-time-submit" type="submit" disabled={reserving}>
+            {reserving ? "Checking availability…" : "Confirm reservation"}
+            {!reserving && <Icon name="arrow" size={16} />}
+          </button>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 
 function ReviewSection({ reviews, rating, reviewCount, loading }) {
   const safeReviews = Array.isArray(reviews) ? reviews : [];
@@ -889,9 +948,8 @@ function ReviewSection({ reviews, rating, reviewCount, loading }) {
 function BuildingDetailsModal({ spot, onClose, onReserve, reserving, reviews = [], reviewRating, reviewCount, reviewsLoading }) {
   if (!spot) return null;
 
-  const availableSlots = spot.parkingSlots?.filter((slot) => slot.vacant).length ?? 0;
   const totalSlots = spot.parkingSlots?.length ?? 0;
-  const hasAvailability = availableSlots > 0;
+  const hasAvailability = totalSlots > 0;
 
   return (
     <div className="building-modal-backdrop" onMouseDown={onClose}>
@@ -918,7 +976,7 @@ function BuildingDetailsModal({ spot, onClose, onReserve, reserving, reviews = [
           <div className="building-hero-overlay">
             <span className="building-status">
               <span className="building-status-dot" />
-              {hasAvailability ? "Available now" : "Currently full"}
+              {hasAvailability ? "Spaces listed" : "No spaces listed"}
             </span>
           </div>
         </div>
@@ -948,7 +1006,7 @@ function BuildingDetailsModal({ spot, onClose, onReserve, reserving, reviews = [
             </div>
             <div className="building-summary-item">
               <Icon name="car" size={17} />
-              <div><strong>{availableSlots}{totalSlots ? ` / ${totalSlots}` : ""}</strong><span>Slots available</span></div>
+              <div><strong>{totalSlots}</strong><span>Total parking slots</span></div>
             </div>
             <div className="building-summary-item">
               <Icon name="clock" size={17} />
@@ -1025,6 +1083,7 @@ function ParkingApp({ user }) {
   const [placeSearchError, setPlaceSearchError] = useState("");
   const [buildingsRefreshKey, setBuildingsRefreshKey] = useState(0);
   const [buildingDetailsOpen, setBuildingDetailsOpen] = useState(false);
+  const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [isReserving, setIsReserving] = useState(false);
   const [reviewToastSpot, setReviewToastSpot] = useState(null);
   const [reviewModalSpot, setReviewModalSpot] = useState(null);
@@ -1239,24 +1298,27 @@ function ParkingApp({ user }) {
     }
   };
 
-  const handleReserve = async () => {
-    const availableSlot = selected?.parkingSlots?.find((slot) => slot.vacant);
-    if (!availableSlot) {
-      setStatus("No parking slots are currently available.");
-      return;
-    }
-
+  const handleReserve = async ({ startTime, endTime }) => {
     setIsReserving(true);
 
     try {
+      const availabilityResponse = await fetch(
+        `${API_BASE_URL}/vacancy/${encodeURIComponent(selected.buildingId)}?${new URLSearchParams({ start_time: startTime, end_time: endTime })}`
+      );
+      const availableSlots = await readApiJson(availabilityResponse, "Could not check parking availability.");
+      if (!Array.isArray(availableSlots) || availableSlots.length === 0) {
+        throw new Error("No parking slots are available for that time. Choose another time.");
+      }
+
       const response = await fetch(`${API_BASE_URL}/booking`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           data: {
             user_id: user.uid,
-            slot_id: availableSlot.id,
-            start_time: new Date().toISOString(),
+            slot_id: availableSlots[0].id,
+            start_time: startTime,
+            end_time: endTime,
           },
         }),
       });
@@ -1267,13 +1329,13 @@ function ParkingApp({ user }) {
       setIsBuildingsLoading(true);
       setBuildingsRefreshKey((value) => value + 1);
 
-      // Demo trigger: show the review prompt a few seconds after booking.
-      // Replace this with the real "parking ended" event when that endpoint is ready.
       const reservedSpot = selected;
       setReviewToastSpot(null);
-      window.setTimeout(() => setReviewToastSpot(reservedSpot), 3000);
+      const reviewDelay = Math.max(0, new Date(endTime).getTime() - Date.now());
+      window.setTimeout(() => setReviewToastSpot(reservedSpot), reviewDelay);
     } catch (error) {
       setStatus(error.message);
+      throw error;
     } finally {
       setIsReserving(false);
     }
@@ -1544,7 +1606,10 @@ function ParkingApp({ user }) {
             <BuildingDetailsModal
               spot={selected}
               onClose={() => setBuildingDetailsOpen(false)}
-              onReserve={handleReserve}
+              onReserve={() => {
+                setBuildingDetailsOpen(false);
+                setBookingModalOpen(true);
+              }}
               reserving={isReserving}
               reviews={stats.reviews}
               reviewRating={stats.rating}
@@ -1553,6 +1618,18 @@ function ParkingApp({ user }) {
             />
           );
         })()}
+
+        {bookingModalOpen && selected && (
+          <BookingTimeModal
+            spot={selected}
+            onClose={() => {
+              setBookingModalOpen(false);
+              setBuildingDetailsOpen(true);
+            }}
+            onReserve={handleReserve}
+            reserving={isReserving}
+          />
+        )}
 
         {reviewToastSpot && !reviewModalSpot && (
           <ReviewToast

@@ -163,7 +163,6 @@ app.get('/vacancy/:buildingId', async (req,res) => {
                 SELECT s.id, s.slot_number, s.vacant
                 FROM parking_slots s
                 WHERE s.building_id = $1
-                  AND s.vacant = true
                   AND NOT EXISTS (
                       SELECT 1
                       FROM bookings b
@@ -203,9 +202,13 @@ app.post('/booking', async (req,res) => {
         !userId.trim() ||
         !Number.isInteger(slotId) ||
         slotId < 1 ||
-        !isValidDate(startTime)
+        typeof startTime !== 'string' ||
+        typeof endTime !== 'string' ||
+        !isValidDate(startTime) ||
+        !isValidDate(endTime) ||
+        new Date(startTime) >= new Date(endTime)
     ) {
-        return res.status(400).json({message:'user_id, slot_id, and start_time are required'});
+        return res.status(400).json({message:'user_id, slot_id, and valid start_time and end_time are required; end_time must be after start_time'});
     }
 
     const client = await pool.connect();
@@ -213,18 +216,13 @@ app.post('/booking', async (req,res) => {
         await client.query('BEGIN');
 
         const slot = await client.query(
-            'SELECT id, vacant FROM parking_slots WHERE id = $1 FOR UPDATE',
+            'SELECT id FROM parking_slots WHERE id = $1 FOR UPDATE',
             [slotId]
         );
         if (slot.rowCount === 0) {
             await client.query('ROLLBACK');
             return res.status(404).json({message:'parking slot not found'});
         }
-        if (!slot.rows[0].vacant) {
-            await client.query('ROLLBACK');
-            return res.status(409).json({message:'parking slot is not vacant'});
-        }
-
         const conflict = await client.query(
             `SELECT 1
              FROM bookings
@@ -244,14 +242,10 @@ app.post('/booking', async (req,res) => {
         }
 
         const created = await client.query(
-            `INSERT INTO bookings (user_id, slot_id, start_time, status, created_at)
-             VALUES ($1, $2, $3::timestamptz, 'confirmed', NOW())
+            `INSERT INTO bookings (user_id, slot_id, start_time, end_time, status, created_at)
+             VALUES ($1, $2, $3::timestamptz, $4::timestamptz, 'confirmed', NOW())
              RETURNING id, user_id, slot_id, start_time, end_time, status, created_at`,
-            [userId, slotId, startTime]
-        );
-        await client.query(
-            'UPDATE parking_slots SET vacant = false WHERE id = $1',
-            [slotId]
+            [userId, slotId, startTime, endTime]
         );
         await client.query('COMMIT');
         res.status(201).json(created.rows[0]);
@@ -259,55 +253,6 @@ app.post('/booking', async (req,res) => {
         await client.query('ROLLBACK');
         console.error(error);
         res.status(500).json({message:'could not create booking'});
-    } finally {
-        client.release();
-    }
-})
-
-app.patch('/booking/:bookingId/end', async (req,res) => {
-    const bookingId = Number.parseInt(req.params.bookingId, 10);
-
-    if (!Number.isInteger(bookingId) || bookingId < 1) {
-        return res.status(400).json({message:'bookingId must be a positive integer'});
-    }
-
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-        const booking = await client.query(
-            `SELECT id, slot_id, status
-             FROM bookings
-             WHERE id = $1
-             FOR UPDATE`,
-            [bookingId]
-        );
-
-        if (booking.rowCount === 0) {
-            await client.query('ROLLBACK');
-            return res.status(404).json({message:'booking not found'});
-        }
-        if (!['pending', 'confirmed'].includes(booking.rows[0].status)) {
-            await client.query('ROLLBACK');
-            return res.status(409).json({message:'booking has already ended'});
-        }
-
-        const ended = await client.query(
-            `UPDATE bookings
-             SET end_time = NOW(), status = 'completed'
-             WHERE id = $1
-             RETURNING id, user_id, slot_id, start_time, end_time, status, created_at`,
-            [bookingId]
-        );
-        await client.query(
-            'UPDATE parking_slots SET vacant = true WHERE id = $1',
-            [booking.rows[0].slot_id]
-        );
-        await client.query('COMMIT');
-        res.json(ended.rows[0]);
-    } catch (error) {
-        await client.query('ROLLBACK');
-        console.error(error);
-        res.status(500).json({message:'could not end booking'});
     } finally {
         client.release();
     }
