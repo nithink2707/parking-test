@@ -114,6 +114,15 @@ const LISTING_TAGS = [
   "Well lit",
   "Security guard",
 ];
+const TAG_QUESTIONS = {
+  "EV charging": "Did the charger work?",
+  "CCTV": "Did the CCTV coverage feel reassuring?",
+  "Covered": "Was the spot actually covered as listed?",
+  "24/7 access": "Was access available when you arrived?",
+  "Well lit": "Was the area well lit?",
+  "Security guard": "Was a guard present on site?",
+};
+
 
 function Icon({ name, size = 18, strokeWidth = 1.9 }) {
   const icons = {
@@ -635,6 +644,137 @@ function ListingModal({ onClose, onCreate }) {
 
 
 
+function StarRating({ value, onChange, size = 26 }) {
+  const [hovered, setHovered] = useState(0);
+
+  return (
+    <div className="star-rating" role="radiogroup" aria-label="Rating">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button
+          key={star}
+          type="button"
+          className={`star-btn ${(hovered || value) >= star ? "filled" : ""}`}
+          onClick={() => onChange(star)}
+          onMouseEnter={() => setHovered(star)}
+          onMouseLeave={() => setHovered(0)}
+          aria-label={`${star} star${star > 1 ? "s" : ""}`}
+          aria-checked={value === star}
+          role="radio"
+        >
+          <Icon name="star" size={size} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ReviewToast({ spot, onOpen, onDismiss }) {
+  return (
+    <div
+      className="review-toast"
+      role="button"
+      tabIndex={0}
+      aria-label={`Rate your experience at ${spot?.title || "your parking spot"}`}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+    >
+      <div className="review-toast-icon">
+        <Icon name="star" size={17} />
+      </div>
+      <div className="review-toast-body">
+        <strong>How was your parking experience?</strong>
+        <span>{spot?.title || "Your parking spot"} · Tap to leave a review</span>
+      </div>
+      <div className="review-toast-actions">
+        <button
+          className="review-toast-cta"
+          type="button"
+          onClick={(event) => { event.stopPropagation(); onOpen(); }}
+        >
+          Rate now
+        </button>
+        <button
+          className="review-toast-dismiss"
+          type="button"
+          onClick={(event) => { event.stopPropagation(); onDismiss(); }}
+          aria-label="Dismiss review notification"
+        >
+          <Icon name="close" size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ReviewModal({ spot, onClose, onSubmit }) {
+  const [stars, setStars] = useState(0);
+  const [answers, setAnswers] = useState({});
+  const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const relevantTags = (spot?.tags || []).filter((tag) => TAG_QUESTIONS[tag]);
+
+  const setAnswer = (tag, value) => {
+    setAnswers((current) => ({ ...current, [tag]: value }));
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!stars) return;
+    setSubmitting(true);
+    try {
+      await onSubmit({ buildingId: spot?.buildingId, spotId: spot?.id, stars, answers, comment: comment.trim() });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <section className="review-modal" role="dialog" aria-modal="true" aria-labelledby="review-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <span className="modal-eyebrow">Rate your ride</span>
+            <h2 id="review-title">{spot?.title || "How was your parking spot?"}</h2>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="Close"><Icon name="close" size={18} /></button>
+        </div>
+
+        <form className="review-form" onSubmit={submit}>
+          <div className="review-stars-block">
+            <StarRating value={stars} onChange={setStars} />
+            <span className="review-stars-hint">{stars ? `${stars} / 5` : "Tap a star to rate"}</span>
+          </div>
+
+          {relevantTags.length > 0 && (
+            <div className="review-tag-questions">
+              {relevantTags.map((tag) => (
+                <div key={tag} className="review-question">
+                  <span>{TAG_QUESTIONS[tag]}</span>
+                  <StarRating value={answers[tag] || 0} onChange={(value) => setAnswer(tag, value)} size={15} />
+                </div>
+              ))}
+            </div>
+          )}
+
+          <label className="review-comment-label">
+            Anything else? <span className="optional">Optional</span>
+            <textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Tell us more…" rows={3} />
+          </label>
+
+          <button className="primary-btn review-submit" type="submit" disabled={!stars || submitting}>
+            {submitting ? "Sending…" : "Submit review"}
+          </button>
+        </form>
+      </section>
+    </div>
+  );
+}
 function BuildingMiniMap({ coords, title }) {
   if (!coords || coords.length < 2) return null;
 
@@ -680,7 +820,55 @@ function BuildingMiniMap({ coords, title }) {
   );
 }
 
-function BuildingDetailsModal({ spot, onClose, onReserve, reserving }) {
+
+function ReviewSection({ reviews, rating, reviewCount, loading }) {
+  const safeReviews = Array.isArray(reviews) ? reviews : [];
+
+  return (
+    <div className="building-detail-section review-display-section">
+      <div className="building-section-title">
+        <strong>Reviews</strong>
+        <span>{reviewCount} {reviewCount === 1 ? "review" : "reviews"}</span>
+      </div>
+
+      <div className="review-summary-card">
+        <div className="review-average">
+          <strong>{Number(rating || 0).toFixed(1)}</strong>
+          <StarRating value={Math.round(Number(rating || 0))} onChange={() => {}} size={15} />
+        </div>
+        <div className="review-summary-copy">
+          <strong>{reviewCount ? "What other drivers think" : "No reviews yet"}</strong>
+          <span>{reviewCount ? `Based on ${reviewCount} ${reviewCount === 1 ? "rating" : "ratings"}` : "Be the first to review this parking spot."}</span>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="review-loading">Loading reviews…</div>
+      ) : safeReviews.length > 0 ? (
+        <div className="review-list">
+          {safeReviews.slice(0, 5).map((review, index) => (
+            <article className="review-item" key={review.id || `${review.createdAt || "review"}-${index}`}>
+              <div className="review-item-head">
+                <div className="review-item-author">
+                  <span className="review-avatar">{(review.userName || "U").charAt(0).toUpperCase()}</span>
+                  <div>
+                    <strong>{review.userName || "Driver"}</strong>
+                    <span>{review.createdAt ? new Date(review.createdAt).toLocaleDateString() : "Recent review"}</span>
+                  </div>
+                </div>
+                <StarRating value={Number(review.stars) || 0} onChange={() => {}} size={13} />
+              </div>
+
+              {review.comment && <p className="review-item-comment">“{review.comment}”</p>}
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function BuildingDetailsModal({ spot, onClose, onReserve, reserving, reviews = [], reviewRating, reviewCount, reviewsLoading }) {
   if (!spot) return null;
 
   const availableSlots = spot.parkingSlots?.filter((slot) => slot.vacant).length ?? 0;
@@ -738,7 +926,7 @@ function BuildingDetailsModal({ spot, onClose, onReserve, reserving }) {
           <div className="building-summary-grid">
             <div className="building-summary-item">
               <Icon name="star" size={17} />
-              <div><strong>{spot.rating}</strong><span>Rating</span></div>
+              <div><strong>{Number(reviewRating ?? spot.rating ?? 0).toFixed(1)}</strong><span>{reviewCount || 0} reviews</span></div>
             </div>
             <div className="building-summary-item">
               <Icon name="car" size={17} />
@@ -769,6 +957,13 @@ function BuildingDetailsModal({ spot, onClose, onReserve, reserving }) {
               <p className="building-no-features">No additional features have been added yet.</p>
             )}
           </div>
+
+          <ReviewSection
+            reviews={reviews}
+            rating={reviewRating ?? spot.rating}
+            reviewCount={reviewCount}
+            loading={reviewsLoading}
+          />
 
           <div className="building-reserve-area">
             <div>
@@ -813,6 +1008,10 @@ function ParkingApp({ user }) {
   const [buildingsRefreshKey, setBuildingsRefreshKey] = useState(0);
   const [buildingDetailsOpen, setBuildingDetailsOpen] = useState(false);
   const [isReserving, setIsReserving] = useState(false);
+  const [reviewToastSpot, setReviewToastSpot] = useState(null);
+  const [reviewModalSpot, setReviewModalSpot] = useState(null);
+  const [reviewsByBuilding, setReviewsByBuilding] = useState({});
+  const [reviewsLoadingByBuilding, setReviewsLoadingByBuilding] = useState({});
   const mapRef = useRef(null);
 
   const selected = parkingSpots.find((spot) => spot.id === selectedId) || parkingSpots[0];
@@ -1048,10 +1247,193 @@ function ParkingApp({ user }) {
       setStatus(`${selected.title} reserved successfully.`);
       setIsBuildingsLoading(true);
       setBuildingsRefreshKey((value) => value + 1);
+
+      // Demo trigger: show the review prompt a few seconds after booking.
+      // Replace this with the real "parking ended" event when that endpoint is ready.
+      const reservedSpot = selected;
+      setReviewToastSpot(null);
+      window.setTimeout(() => setReviewToastSpot(reservedSpot), 3000);
     } catch (error) {
       setStatus(error.message);
     } finally {
       setIsReserving(false);
+    }
+  };
+
+
+  const getReviewKey = useCallback((spot) => (
+    spot?.buildingId != null ? String(spot.buildingId) : String(spot?.id || "")
+  ), []);
+
+  const normaliseReview = useCallback((review) => {
+    const item = review?.review || review || {};
+    return {
+      id: item.id || item.review_id || item._id,
+      userName: item.userName || item.user_name || item.username || item.name || "Driver",
+      stars: Number(item.stars ?? item.rating ?? item.overall_rating ?? 0),
+      comment: item.comment || item.text || item.review || "",
+      answers: item.answers || item.feature_ratings || {},
+      createdAt: item.createdAt || item.created_at || item.timestamp || null,
+    };
+  }, []);
+
+  const getReviewsFromResponse = useCallback((data) => {
+    if (Array.isArray(data)) return data.map(normaliseReview);
+    if (Array.isArray(data?.reviews)) return data.reviews.map(normaliseReview);
+    if (Array.isArray(data?.data)) return data.data.map(normaliseReview);
+    if (Array.isArray(data?.results)) return data.results.map(normaliseReview);
+    return [];
+  }, [normaliseReview]);
+
+  const loadReviews = useCallback(async (spot) => {
+    if (!spot) return;
+
+    const key = getReviewKey(spot);
+    if (!key) return;
+
+    setReviewsLoadingByBuilding((current) => ({ ...current, [key]: true }));
+
+    try {
+      const buildingId = spot.buildingId ?? spot.id;
+
+      // The frontend accepts either query style so it can work with the
+      // current /reviews implementation or a buildingId-based endpoint.
+      const urls = [
+        `${API_BASE_URL}/reviews?buildingId=${encodeURIComponent(buildingId)}`,
+        `${API_BASE_URL}/reviews?spotId=${encodeURIComponent(spot.id)}`,
+      ];
+
+      let loaded = false;
+      for (const url of urls) {
+        try {
+          const response = await fetch(url);
+          if (!response.ok) continue;
+
+          const data = await response.json();
+          const reviews = getReviewsFromResponse(data);
+
+          setReviewsByBuilding((current) => ({ ...current, [key]: reviews }));
+          loaded = true;
+          break;
+        } catch {
+          // Try the second compatible endpoint.
+        }
+      }
+
+      if (!loaded) {
+        const cached = window.localStorage.getItem(`ctrlpark-reviews-${key}`);
+        if (cached) {
+          try {
+            const reviews = JSON.parse(cached);
+            if (Array.isArray(reviews)) {
+              setReviewsByBuilding((current) => ({ ...current, [key]: reviews }));
+            }
+          } catch {
+            // Ignore invalid local cache.
+          }
+        }
+      }
+    } finally {
+      setReviewsLoadingByBuilding((current) => ({ ...current, [key]: false }));
+    }
+  }, [getReviewKey, getReviewsFromResponse]);
+
+  useEffect(() => {
+    if (selected) loadReviews(selected);
+  }, [selected?.buildingId, selected?.id, loadReviews]);
+
+  const reviewStats = useCallback((spot) => {
+    const key = getReviewKey(spot);
+    const reviews = reviewsByBuilding[key] || [];
+    const validRatings = reviews
+      .map((review) => Number(review.stars))
+      .filter((stars) => stars >= 1 && stars <= 5);
+
+    if (!validRatings.length) {
+      return {
+        reviews,
+        rating: Number(spot?.rating || 0),
+        count: 0,
+      };
+    }
+
+    return {
+      reviews,
+      rating: validRatings.reduce((sum, value) => sum + value, 0) / validRatings.length,
+      count: validRatings.length,
+    };
+  }, [getReviewKey, reviewsByBuilding]);
+
+  const submitReview = async ({ buildingId, spotId, stars, answers, comment }) => {
+    const spot = parkingSpots.find((item) => item.id === spotId);
+    const key = getReviewKey(spot || { buildingId, id: spotId });
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/reviews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          buildingId: buildingId ?? spot?.buildingId ?? spotId,
+          spotId,
+          userId: user.uid,
+          stars,
+          answers,
+          comment,
+        }),
+      });
+
+      const data = await readApiJson(response, "Could not submit your review.");
+      const savedReview = normaliseReview(data?.review || data);
+
+      const reviewToAdd = {
+        ...savedReview,
+        stars: Number(savedReview.stars || stars),
+        comment,
+        answers,
+        createdAt: savedReview.createdAt || new Date().toISOString(),
+        userName: savedReview.userName || user.displayName || user.email?.split("@")[0] || "Driver",
+      };
+
+      setReviewsByBuilding((current) => {
+        const previous = current[key] || [];
+        const next = [
+          reviewToAdd,
+          ...previous.filter((review) => review.id && review.id !== reviewToAdd.id),
+        ];
+
+        try {
+          window.localStorage.setItem(`ctrlpark-reviews-${key}`, JSON.stringify(next));
+        } catch {
+          // Local cache is optional.
+        }
+
+        return { ...current, [key]: next };
+      });
+
+      // Update the rating on the building/card immediately.
+      setParkingSpots((current) => current.map((item) => {
+        if (getReviewKey(item) !== key) return item;
+
+        const existing = reviewsByBuilding[key] || [];
+        const ratings = [
+          ...existing.map((review) => Number(review.stars)).filter((value) => value >= 1 && value <= 5),
+          Number(stars),
+        ];
+
+        const average = ratings.reduce((sum, value) => sum + value, 0) / ratings.length;
+        return { ...item, rating: Number(average.toFixed(1)) };
+      }));
+
+      setStatus("Thanks for rating your parking experience!");
+      setReviewModalSpot(null);
+
+      // Refresh from the backend so the UI reflects the canonical database state.
+      if (spot) loadReviews(spot);
+
+      return true;
+    } catch (error) {
+      setStatus(error.message);
+      return false;
     }
   };
 
@@ -1178,12 +1560,40 @@ function ParkingApp({ user }) {
 
         </aside>
 
-        {activePanel === "nearby" && selected && buildingDetailsOpen && (
-          <BuildingDetailsModal
-            spot={selected}
-            onClose={() => setBuildingDetailsOpen(false)}
-            onReserve={handleReserve}
-            reserving={isReserving}
+        {activePanel === "nearby" && selected && buildingDetailsOpen && (() => {
+          const stats = reviewStats(selected);
+          const reviewKey = getReviewKey(selected);
+
+          return (
+            <BuildingDetailsModal
+              spot={selected}
+              onClose={() => setBuildingDetailsOpen(false)}
+              onReserve={handleReserve}
+              reserving={isReserving}
+              reviews={stats.reviews}
+              reviewRating={stats.rating}
+              reviewCount={stats.count}
+              reviewsLoading={Boolean(reviewsLoadingByBuilding[reviewKey])}
+            />
+          );
+        })()}
+
+        {reviewToastSpot && !reviewModalSpot && (
+          <ReviewToast
+            spot={reviewToastSpot}
+            onOpen={() => {
+              setReviewModalSpot(reviewToastSpot);
+              setReviewToastSpot(null);
+            }}
+            onDismiss={() => setReviewToastSpot(null)}
+          />
+        )}
+
+        {reviewModalSpot && (
+          <ReviewModal
+            spot={reviewModalSpot}
+            onClose={() => setReviewModalSpot(null)}
+            onSubmit={submitReview}
           />
         )}
 
