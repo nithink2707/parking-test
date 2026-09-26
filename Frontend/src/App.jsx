@@ -38,16 +38,6 @@ async function readApiJson(response, fallbackMessage) {
   return data;
 }
 
-// const DESTINATIONS = [
-//   {
-//     key: "puma-electronic-city",
-//     name: "PUMA, Electronic City",
-//     subtitle: "Electronic City, Bengaluru",
-//     coords: [12.8407, 77.6763],
-//     aliases: ["puma", "puma electronic city", "electronic city", "electronic", "ecity", "e city"],
-//   },
-// ];
-
 // const PARKING_SPOTS = [
 //   {
 //     id: "P-01",
@@ -352,6 +342,11 @@ function ListingModal({ onClose, onCreate }) {
   const [slots,setSlots] = useState(1)
   const [location, setLocation] = useState("");
   const [coordinates, setCoordinates] = useState(null);
+  const [placeQuery, setPlaceQuery] = useState("");
+  const [selectedPlaceLabel, setSelectedPlaceLabel] = useState("");
+  const [placeSuggestions, setPlaceSuggestions] = useState([]);
+  const [placeSearchLoading, setPlaceSearchLoading] = useState(false);
+  const [placeSearchError, setPlaceSearchError] = useState("");
   const [price, setPrice] = useState(40);
   const [type, setType] = useState("Private");
   const [tags, setTags] = useState([]);
@@ -360,6 +355,69 @@ function ListingModal({ onClose, onCreate }) {
   const [locating, setLocating] = useState(false);
   const fileRef = useRef(null);
   const listingMapRef = useRef(null);
+
+  useEffect(() => {
+    const normalizedQuery = placeQuery.trim();
+    if (normalizedQuery.length < 3 || selectedPlaceLabel === normalizedQuery) {
+      setPlaceSuggestions([]);
+      setPlaceSearchLoading(false);
+      setPlaceSearchError("");
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setPlaceSearchLoading(true);
+      setPlaceSearchError("");
+
+      try {
+        const params = new URLSearchParams({ q: normalizedQuery, limit: "5", lang: "en" });
+        const mapCenter = listingMapRef.current?.getCenter();
+        if (mapCenter) {
+          params.set("lat", String(mapCenter.lat));
+          params.set("lon", String(mapCenter.lng));
+        }
+
+        const response = await fetch(`https://photon.komoot.io/api/?${params}`, { signal: controller.signal });
+        if (!response.ok) throw new Error("Place search is temporarily unavailable.");
+
+        const result = await response.json();
+        const suggestions = (result.features || []).flatMap((feature) => {
+          const featureCoordinates = feature.geometry?.coordinates;
+          if (!Array.isArray(featureCoordinates) || featureCoordinates.length < 2) return [];
+
+          const properties = feature.properties || {};
+          const name = properties.name || [properties.housenumber, properties.street].filter(Boolean).join(" ") || properties.street || properties.city || properties.state || "Unnamed place";
+          const subtitle = [...new Set([properties.city || properties.locality || properties.district, properties.state, properties.country].filter(Boolean))]
+            .filter((part) => part !== name)
+            .join(", ");
+          const label = [name, subtitle].filter(Boolean).join(", ");
+
+          return [{
+            id: `${properties.osm_type || "place"}-${properties.osm_id || `${featureCoordinates[0]}-${featureCoordinates[1]}`}`,
+            name,
+            subtitle,
+            label,
+            coords: [featureCoordinates[1], featureCoordinates[0]],
+          }];
+        });
+
+        if (!controller.signal.aborted) setPlaceSuggestions(suggestions);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setPlaceSuggestions([]);
+          setPlaceSearchError(error.message || "Could not search places.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setPlaceSearchLoading(false);
+      }
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [placeQuery, selectedPlaceLabel]);
 
   const toggleTag = (tag) => {
     setTags((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]);
@@ -376,6 +434,17 @@ function ListingModal({ onClose, onCreate }) {
   const handleLocationSelect = ([latitude, longitude]) => {
     setCoordinates([latitude, longitude]);
     setLocation(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+    setPlaceQuery("");
+    setSelectedPlaceLabel("");
+  };
+
+  const selectListingPlace = (place) => {
+    setCoordinates(place.coords);
+    setLocation(place.label);
+    setPlaceQuery(place.label);
+    setSelectedPlaceLabel(place.label);
+    setPlaceSuggestions([]);
+    listingMapRef.current?.flyTo(place.coords, 17, { duration: 0.8 });
   };
 
   const useMyLocation = () => {
@@ -392,6 +461,8 @@ function ListingModal({ onClose, onCreate }) {
 
         setCoordinates([latitude, longitude]);
         setLocation(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+        setPlaceQuery("");
+        setSelectedPlaceLabel("");
 
         listingMapRef.current?.flyTo(
           [latitude, longitude],
@@ -447,6 +518,37 @@ function ListingModal({ onClose, onCreate }) {
           <label>Space Name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ajmera" required /></label>
 
           <div className="location-picker-field">
+            <label className="listing-place-search">
+              Search for a place
+              <input
+                value={placeQuery}
+                onChange={(event) => {
+                  setPlaceQuery(event.target.value);
+                  setSelectedPlaceLabel("");
+                }}
+                placeholder="Search an address or landmark"
+                autoComplete="off"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-controls="listing-place-suggestions"
+                aria-expanded={placeQuery.trim().length >= 3 && selectedPlaceLabel !== placeQuery.trim()}
+              />
+            </label>
+
+            {placeQuery.trim().length >= 3 && selectedPlaceLabel !== placeQuery.trim() && (
+              <div className="search-suggestion listing-place-suggestions" id="listing-place-suggestions" role="listbox" aria-label="Listing location suggestions">
+                {placeSearchLoading && <div className="place-suggestion-state">Searching places...</div>}
+                {placeSearchError && <div className="place-suggestion-state" role="alert">{placeSearchError}</div>}
+                {!placeSearchLoading && !placeSearchError && placeSuggestions.length === 0 && <div className="place-suggestion-state">No places found</div>}
+                {placeSuggestions.map((place) => (
+                  <button className="place-suggestion" type="button" role="option" aria-selected="false" key={place.id} onClick={() => selectListingPlace(place)}>
+                    <span className="search-suggestion-icon"><Icon name="pin" size={16} /></span>
+                    <span className="place-suggestion-copy"><strong>{place.name}</strong><span>{place.subtitle}</span></span>
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="location-label-row">
               <label>
                 Parking location
@@ -705,6 +807,9 @@ function ParkingApp({ user }) {
   const [myListingsError, setMyListingsError] = useState("");
   const [listingsRefreshKey, setListingsRefreshKey] = useState(0);
   const [destination, setDestination] = useState(null);
+  const [placeSuggestions, setPlaceSuggestions] = useState([]);
+  const [placeSearchLoading, setPlaceSearchLoading] = useState(false);
+  const [placeSearchError, setPlaceSearchError] = useState("");
   const [buildingsRefreshKey, setBuildingsRefreshKey] = useState(0);
   const [buildingDetailsOpen, setBuildingDetailsOpen] = useState(false);
   const [isReserving, setIsReserving] = useState(false);
@@ -712,21 +817,15 @@ function ParkingApp({ user }) {
 
   const selected = parkingSpots.find((spot) => spot.id === selectedId) || parkingSpots[0];
 
-  const destinationMatch = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    if (!normalized) return null;
-    return DESTINATIONS.find((place) => place.aliases.some((alias) => normalized.includes(alias) || alias.includes(normalized))) || null;
-  }, [query]);
-
   const filteredSpots = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    if (!normalized || destinationMatch) return parkingSpots;
+    if (!normalized || destination || normalized.length >= 3) return parkingSpots;
     const tokens = normalized.split(/\s+/).filter(Boolean);
     return parkingSpots.filter((spot) => {
       const searchable = `${spot.title} ${spot.address} ${spot.type} ${spot.tags.join(" ")}`.toLowerCase();
       return tokens.some((token) => searchable.includes(token));
     });
-  }, [query, parkingSpots, destinationMatch]);
+  }, [query, parkingSpots, destination]);
 
   const sortedSpots = useMemo(() => {
     const spots = [...filteredSpots];
@@ -736,12 +835,67 @@ function ParkingApp({ user }) {
   }, [filteredSpots, sort]);
 
   useEffect(() => {
-    setDestination(destinationMatch);
-    if (destinationMatch) {
-      mapRef.current?.flyTo(destinationMatch.coords, 16.5, { duration: 0.8 });
-      setResultsOpen(true);
+    const normalizedQuery = query.trim();
+    if (normalizedQuery.length < 3 || destination?.label === normalizedQuery) {
+      setPlaceSuggestions([]);
+      setPlaceSearchLoading(false);
+      setPlaceSearchError("");
+      return undefined;
     }
-  }, [destinationMatch]);
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setPlaceSearchLoading(true);
+      setPlaceSearchError("");
+
+      try {
+        const params = new URLSearchParams({ q: normalizedQuery, limit: "5", lang: "en" });
+        const mapCenter = mapRef.current?.getCenter();
+        if (mapCenter) {
+          params.set("lat", String(mapCenter.lat));
+          params.set("lon", String(mapCenter.lng));
+        }
+
+        const response = await fetch(`https://photon.komoot.io/api/?${params}`, { signal: controller.signal });
+        if (!response.ok) throw new Error("Place search is temporarily unavailable.");
+
+        const result = await response.json();
+        const suggestions = (result.features || []).flatMap((feature) => {
+          const coordinates = feature.geometry?.coordinates;
+          if (!Array.isArray(coordinates) || coordinates.length < 2) return [];
+
+          const properties = feature.properties || {};
+          const name = properties.name || [properties.housenumber, properties.street].filter(Boolean).join(" ") || properties.street || properties.city || properties.state || "Unnamed place";
+          const subtitle = [...new Set([properties.city || properties.locality || properties.district, properties.state, properties.country].filter(Boolean))]
+            .filter((part) => part !== name)
+            .join(", ");
+          const label = [name, subtitle].filter(Boolean).join(", ");
+
+          return [{
+            id: properties.osm_id || `${coordinates[0]}-${coordinates[1]}`,
+            name,
+            subtitle,
+            label,
+            coords: [coordinates[1], coordinates[0]],
+          }];
+        });
+
+        if (!controller.signal.aborted) setPlaceSuggestions(suggestions);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setPlaceSuggestions([]);
+          setPlaceSearchError(error.message || "Could not search places.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setPlaceSearchLoading(false);
+      }
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [destination, query]);
 
   useEffect(() => {
     if (parkingSpots.length > 0 && !parkingSpots.some((spot) => spot.id === selectedId)) {
@@ -790,6 +944,21 @@ function ParkingApp({ user }) {
       setBuildingDetailsOpen(true);
     }
   }, [parkingSpots]);
+
+  const handlePlaceQueryChange = (event) => {
+    setQuery(event.target.value);
+    setDestination(null);
+  };
+
+  const selectDestination = (place) => {
+    setDestination(place);
+    setQuery(place.label);
+    setPlaceSuggestions([]);
+    mapRef.current?.flyTo(place.coords, 16.5, { duration: 0.8 });
+    setResultsOpen(true);
+  };
+
+  const showPlaceSuggestions = query.trim().length >= 3 && !destination;
 
   const showMyListings = () => {
     setActivePanel("mine");
@@ -894,15 +1063,21 @@ function ParkingApp({ user }) {
 
         <div className="topbar-search">
           <Icon name="search" size={17} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search a place, landmark or area…" aria-label="Search a destination" />
-          {query && <button className="clear-btn" type="button" onClick={() => setQuery("")} aria-label="Clear search"><Icon name="close" size={15} /></button>}
+          <input value={query} onChange={handlePlaceQueryChange} placeholder="Search a place, landmark or area…" aria-label="Search a destination" role="combobox" aria-autocomplete="list" aria-controls="place-suggestions" aria-expanded={showPlaceSuggestions} />
+          {query && <button className="clear-btn" type="button" onClick={() => { setQuery(""); setDestination(null); }} aria-label="Clear search"><Icon name="close" size={15} /></button>}
         </div>
 
-        {query.trim() && (
-          <div className="search-suggestion">
-            <div className="search-suggestion-icon"><Icon name="pin" size={16} /></div>
-            <div><strong>{destination?.name || query}</strong><span>{destination?.subtitle || "Search nearby parking"}</span></div>
-            <span className="search-suggestion-count">{isBuildingsLoading ? "Loading..." : `${filteredSpots.length} spots`}</span>
+        {showPlaceSuggestions && (
+          <div className="search-suggestion" id="place-suggestions" role="listbox" aria-label="Place suggestions">
+            {placeSearchLoading && <div className="place-suggestion-state">Searching places...</div>}
+            {placeSearchError && <div className="place-suggestion-state" role="alert">{placeSearchError}</div>}
+            {!placeSearchLoading && !placeSearchError && placeSuggestions.length === 0 && <div className="place-suggestion-state">No places found</div>}
+            {placeSuggestions.map((place) => (
+              <button className="place-suggestion" type="button" role="option" aria-selected="false" key={place.id} onClick={() => selectDestination(place)}>
+                <span className="search-suggestion-icon"><Icon name="pin" size={16} /></span>
+                <span className="place-suggestion-copy"><strong>{place.name}</strong><span>{place.subtitle}</span></span>
+              </button>
+            ))}
           </div>
         )}
 
@@ -933,9 +1108,10 @@ function ParkingApp({ user }) {
             />
             {parkingSpots.map((spot) => <SpotMarker key={spot.id} spot={spot} selected={spot.id === selectedId} onSelect={selectSpot} />)}
             {userLocation && <><CircleMarker center={[userLocation.lat, userLocation.lng]} radius={7} pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#3b82f6", fillOpacity: 1 }} /><Circle center={[userLocation.lat, userLocation.lng]} radius={userLocation.accuracy} pathOptions={{ color: "#3b82f6", weight: 1, fillColor: "#3b82f6", fillOpacity: 0.08 }} /></>}
+            {destination && <CircleMarker center={destination.coords} radius={12} pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#d45b36", fillOpacity: 1 }}><Tooltip direction="top" offset={[0, -10]} opacity={1}>{destination.name}</Tooltip></CircleMarker>}
           </MapContainer>
 
-          <div className="map-search-mobile"><Icon name="search" size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search a destination" aria-label="Search a destination" /></div>
+          <div className="map-search-mobile"><Icon name="search" size={17} /><input value={query} onChange={handlePlaceQueryChange} placeholder="Search a destination" aria-label="Search a destination" role="combobox" aria-autocomplete="list" aria-controls="place-suggestions" aria-expanded={showPlaceSuggestions} /></div>
 
           <div className="map-controls">
             <button className="map-control" type="button" onClick={locate} title="Find my location"><Icon name="locate" size={19} /></button>
