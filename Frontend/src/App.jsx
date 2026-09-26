@@ -717,23 +717,44 @@ function ReviewToast({ spot, onOpen, onDismiss }) {
 }
 
 function ReviewModal({ spot, onClose, onSubmit }) {
-  const [stars, setStars] = useState(0);
+  const QUESTIONS = [
+    "How clean was the parking spot?",
+    "Was the parking spot as described?",
+    "Was the location easy to find?",
+    "Was the parking area safe and well-lit?",
+    "How was your overall parking experience?",
+  ];
+
+  const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState({});
-  const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const currentRating = answers[step] || 0;
+  const isLastQuestion = step === QUESTIONS.length - 1;
 
-  const relevantTags = (spot?.tags || []).filter((tag) => TAG_QUESTIONS[tag]);
-
-  const setAnswer = (tag, value) => {
-    setAnswers((current) => ({ ...current, [tag]: value }));
+  const handleRating = (value) => {
+    setAnswers((current) => ({ ...current, [step]: value }));
   };
 
-  const submit = async (event) => {
+  const next = async (event) => {
     event.preventDefault();
-    if (!stars) return;
+    if (!currentRating) return;
+
+    if (!isLastQuestion) {
+      setStep((current) => current + 1);
+      return;
+    }
+
     setSubmitting(true);
     try {
-      await onSubmit({ buildingId: spot?.buildingId, spotId: spot?.id, stars, answers, comment: comment.trim() });
+      await onSubmit({
+        buildingId: spot?.buildingId,
+        spotId: spot?.id,
+        stars: answers[4],
+        answers: Object.fromEntries(
+          QUESTIONS.map((question, index) => [question, answers[index] || 0])
+        ),
+        comment: "",
+      });
     } finally {
       setSubmitting(false);
     }
@@ -745,41 +766,33 @@ function ReviewModal({ spot, onClose, onSubmit }) {
         <div className="modal-head">
           <div>
             <span className="modal-eyebrow">Rate your ride</span>
-            <h2 id="review-title">{spot?.title || "How was your parking spot?"}</h2>
+            <h2 id="review-title">{spot?.title || "Your parking experience"}</h2>
           </div>
           <button className="modal-close" type="button" onClick={onClose} aria-label="Close"><Icon name="close" size={18} /></button>
         </div>
 
-        <form className="review-form" onSubmit={submit}>
-          <div className="review-stars-block">
-            <StarRating value={stars} onChange={setStars} />
-            <span className="review-stars-hint">{stars ? `${stars} / 5` : "Tap a star to rate"}</span>
+        <form className="review-form" onSubmit={next}>
+          <div className="review-progress">
+            <span>Question {step + 1} of {QUESTIONS.length}</span>
+            <div className="review-progress-track"><div style={{ width: `${((step + 1) / QUESTIONS.length) * 100}%` }} /></div>
           </div>
 
-          {relevantTags.length > 0 && (
-            <div className="review-tag-questions">
-              {relevantTags.map((tag) => (
-                <div key={tag} className="review-question">
-                  <span>{TAG_QUESTIONS[tag]}</span>
-                  <StarRating value={answers[tag] || 0} onChange={(value) => setAnswer(tag, value)} size={15} />
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="review-question-main">
+            <h3>{QUESTIONS[step]}</h3>
+            <p>{currentRating ? `You selected ${currentRating} / 5` : "Tap a star to answer"}</p>
+            <StarRating value={currentRating} onChange={handleRating} size={34} />
+          </div>
 
-          <label className="review-comment-label">
-            Anything else? <span className="optional">Optional</span>
-            <textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Tell us more…" rows={3} />
-          </label>
-
-          <button className="primary-btn review-submit" type="submit" disabled={!stars || submitting}>
-            {submitting ? "Sending…" : "Submit review"}
+          <button className="primary-btn review-submit" type="submit" disabled={!currentRating || submitting}>
+            {submitting ? "Submitting…" : isLastQuestion ? "Submit review" : "Next"}
+            {!submitting && <Icon name="arrow" size={16} />}
           </button>
         </form>
       </section>
     </div>
   );
 }
+
 function BuildingMiniMap({ coords, title }) {
   if (!coords || coords.length < 2) return null;
 
@@ -1291,7 +1304,7 @@ function ParkingApp({ user }) {
     return [];
   }, [normaliseReview]);
 
-  const loadReviews = useCallback(async (spot) => {
+  const loadReviews = useCallback((spot) => {
     if (!spot) return;
 
     const key = getReviewKey(spot);
@@ -1300,49 +1313,19 @@ function ParkingApp({ user }) {
     setReviewsLoadingByBuilding((current) => ({ ...current, [key]: true }));
 
     try {
-      const buildingId = spot.buildingId ?? spot.id;
+      const cached = window.localStorage.getItem(`ctrlpark-reviews-${key}`);
+      const reviews = cached ? JSON.parse(cached) : [];
 
-      // The frontend accepts either query style so it can work with the
-      // current /reviews implementation or a buildingId-based endpoint.
-      const urls = [
-        `${API_BASE_URL}/reviews?buildingId=${encodeURIComponent(buildingId)}`,
-        `${API_BASE_URL}/reviews?spotId=${encodeURIComponent(spot.id)}`,
-      ];
-
-      let loaded = false;
-      for (const url of urls) {
-        try {
-          const response = await fetch(url);
-          if (!response.ok) continue;
-
-          const data = await response.json();
-          const reviews = getReviewsFromResponse(data);
-
-          setReviewsByBuilding((current) => ({ ...current, [key]: reviews }));
-          loaded = true;
-          break;
-        } catch {
-          // Try the second compatible endpoint.
-        }
-      }
-
-      if (!loaded) {
-        const cached = window.localStorage.getItem(`ctrlpark-reviews-${key}`);
-        if (cached) {
-          try {
-            const reviews = JSON.parse(cached);
-            if (Array.isArray(reviews)) {
-              setReviewsByBuilding((current) => ({ ...current, [key]: reviews }));
-            }
-          } catch {
-            // Ignore invalid local cache.
-          }
-        }
-      }
+      setReviewsByBuilding((current) => ({
+        ...current,
+        [key]: Array.isArray(reviews) ? reviews.map(normaliseReview) : [],
+      }));
+    } catch {
+      setReviewsByBuilding((current) => ({ ...current, [key]: [] }));
     } finally {
       setReviewsLoadingByBuilding((current) => ({ ...current, [key]: false }));
     }
-  }, [getReviewKey, getReviewsFromResponse]);
+  }, [getReviewKey, normaliseReview]);
 
   useEffect(() => {
     if (selected) loadReviews(selected);
@@ -1370,77 +1353,64 @@ function ParkingApp({ user }) {
     };
   }, [getReviewKey, reviewsByBuilding]);
 
-  const submitReview = async ({ buildingId, spotId, stars, answers, comment }) => {
+  const submitReview = ({ buildingId, spotId, stars, answers, comment }) => {
     const spot = parkingSpots.find((item) => item.id === spotId);
     const key = getReviewKey(spot || { buildingId, id: spotId });
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/reviews`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          buildingId: buildingId ?? spot?.buildingId ?? spotId,
-          spotId,
-          userId: user.uid,
-          stars,
-          answers,
-          comment,
-        }),
-      });
+    const reviewToAdd = {
+      id: `local-review-${Date.now()}`,
+      userName: user?.displayName || user?.email?.split("@")[0] || "You",
+      stars: Number(stars),
+      comment: comment?.trim() || "",
+      answers: answers || {},
+      createdAt: new Date().toISOString(),
+    };
 
-      const data = await readApiJson(response, "Could not submit your review.");
-      const savedReview = normaliseReview(data?.review || data);
+    setReviewsByBuilding((current) => {
+      const previous = current[key] || [];
+      const next = [reviewToAdd, ...previous];
 
-      const reviewToAdd = {
-        ...savedReview,
-        stars: Number(savedReview.stars || stars),
-        comment,
-        answers,
-        createdAt: savedReview.createdAt || new Date().toISOString(),
-        userName: savedReview.userName || user.displayName || user.email?.split("@")[0] || "Driver",
-      };
+      try {
+        window.localStorage.setItem(
+          `ctrlpark-reviews-${key}`,
+          JSON.stringify(next)
+        );
+      } catch {
+        // Local storage is optional.
+      }
 
-      setReviewsByBuilding((current) => {
-        const previous = current[key] || [];
-        const next = [
-          reviewToAdd,
-          ...previous.filter((review) => review.id && review.id !== reviewToAdd.id),
-        ];
+      return { ...current, [key]: next };
+    });
 
-        try {
-          window.localStorage.setItem(`ctrlpark-reviews-${key}`, JSON.stringify(next));
-        } catch {
-          // Local cache is optional.
-        }
-
-        return { ...current, [key]: next };
-      });
-
-      // Update the rating on the building/card immediately.
-      setParkingSpots((current) => current.map((item) => {
+    setParkingSpots((current) =>
+      current.map((item) => {
         if (getReviewKey(item) !== key) return item;
 
         const existing = reviewsByBuilding[key] || [];
         const ratings = [
-          ...existing.map((review) => Number(review.stars)).filter((value) => value >= 1 && value <= 5),
+          ...existing
+            .map((review) => Number(review.stars))
+            .filter((value) => value >= 1 && value <= 5),
           Number(stars),
         ];
 
-        const average = ratings.reduce((sum, value) => sum + value, 0) / ratings.length;
-        return { ...item, rating: Number(average.toFixed(1)) };
-      }));
+        const average =
+          ratings.reduce((sum, value) => sum + value, 0) / ratings.length;
 
-      setStatus("Thanks for rating your parking experience!");
-      setReviewModalSpot(null);
+        return {
+          ...item,
+          rating: Number(average.toFixed(1)),
+        };
+      })
+    );
 
-      // Refresh from the backend so the UI reflects the canonical database state.
-      if (spot) loadReviews(spot);
+    setStatus("Thanks for rating your parking experience!");
 
-      return true;
-    } catch (error) {
-      setStatus(error.message);
-      return false;
-    }
+    // Close the review window immediately after submitting.
+    setReviewModalSpot(null);
+    setReviewToastSpot(null);
+
+    return true;
   };
 
   return (

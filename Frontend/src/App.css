@@ -2064,7 +2064,12 @@ button {
 }
 
 .star-btn.filled {
-  color: #e0a52b;
+  color: #facc15;
+}
+
+.star-btn.filled svg {
+  fill: currentColor;
+  stroke: currentColor;
 }
 
 .review-stars-hint {
@@ -2341,3 +2346,17 @@ button {
     min-width: 70px;
   }
 }
+
+
+/* Five-step review flow */
+.review-progress { margin-bottom: 24px; }
+.review-progress > span { display:block; margin-bottom:8px; color:#777b74; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; }
+.review-progress-track { height:5px; overflow:hidden; border-radius:999px; background:#ecece6; }
+.review-progress-track div { height:100%; border-radius:999px; background:#1e6b4d; transition:width 180ms ease; }
+.review-question-main { padding:26px 10px 30px; text-align:center; }
+.review-question-main h3 { margin:0 auto 9px; max-width:430px; color:#111315; font-family:"Manrope",sans-serif; font-size:21px; line-height:1.3; letter-spacing:-.4px; }
+.review-question-main p { margin:0 0 20px; color:#858981; font-size:11px; }
+.review-question-main .star-rating { justify-content:center; gap:7px; }
+.review-question-main .star-btn { padding:5px; }
+.review-question-main .star-btn.filled { color:#facc15; }
+.review-question-main .star-btn.filled svg { fill:currentColor; stroke:currentColor; }
