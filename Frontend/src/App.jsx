@@ -588,6 +588,16 @@ function ParkingApp({ user }) {
     }
   }, [parkingSpots, selectedId]);
 
+  // Leaflet keeps its old canvas size when the results panel is closed.
+  // Recalculate the map size after the layout expands so there is no blank area.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      mapRef.current?.invalidateSize({ animate: false });
+    }, 50);
+
+    return () => window.clearTimeout(timer);
+  }, [resultsOpen]);
+
   useEffect(() => {
     if (activePanel !== "mine") return undefined;
 
