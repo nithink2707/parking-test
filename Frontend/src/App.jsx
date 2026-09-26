@@ -354,7 +354,9 @@ function ListingModal({ onClose, onCreate }) {
   const [tags, setTags] = useState([]);
   const [image, setImage] = useState("");
   const [listingEnabled, setListingEnabled] = useState(true);
+  const [locating, setLocating] = useState(false);
   const fileRef = useRef(null);
+  const listingMapRef = useRef(null);
 
   const toggleTag = (tag) => {
     setTags((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]);
@@ -371,6 +373,41 @@ function ListingModal({ onClose, onCreate }) {
   const handleLocationSelect = ([latitude, longitude]) => {
     setCoordinates([latitude, longitude]);
     setLocation(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+  };
+
+  const useMyLocation = () => {
+    if (!("geolocation" in navigator)) {
+      alert("Location is not supported by your browser.");
+      return;
+    }
+
+    setLocating(true);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+
+        setCoordinates([latitude, longitude]);
+        setLocation(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+
+        listingMapRef.current?.flyTo(
+          [latitude, longitude],
+          17,
+          { duration: 0.8 }
+        );
+
+        setLocating(false);
+      },
+      () => {
+        alert("Could not access your location. Please allow location access.");
+        setLocating(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    );
   };
 
   const submit = (event) => {
@@ -407,9 +444,39 @@ function ListingModal({ onClose, onCreate }) {
           <label>Space Name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ajmera" required /></label>
 
           <div className="location-picker-field">
-            <label>Parking location<input value={location} placeholder="Click the map to choose a location" readOnly required /></label>
+            <div className="location-label-row">
+              <label>
+                Parking location
+                <input
+                  value={location}
+                  placeholder="Click the map or use your location"
+                  readOnly
+                  required
+                />
+              </label>
+
+              <button
+                type="button"
+                className="use-location-btn"
+                onClick={useMyLocation}
+                disabled={locating}
+              >
+                <Icon name="locate" size={15} />
+                {locating ? "Finding..." : "Use my location"}
+              </button>
+            </div>
+
             <div className="listing-location-map" aria-label="Select parking location on map">
-              <MapContainer center={CENTER} zoom={15} zoomControl={false} scrollWheelZoom className="listing-map">
+              <MapContainer
+                center={CENTER}
+                zoom={15}
+                zoomControl={false}
+                scrollWheelZoom={true}
+                className="listing-map"
+                whenReady={(event) => {
+                  listingMapRef.current = event.target;
+                }}
+              >
                 <TileLayer
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -417,8 +484,12 @@ function ListingModal({ onClose, onCreate }) {
                 />
                 <LocationPicker coordinates={coordinates} onSelect={handleLocationSelect} />
               </MapContainer>
+
+              <div className="listing-map-hint">
+                <Icon name="pin" size={14} />
+                Click anywhere on the map to adjust the location
+              </div>
             </div>
-            <small className="location-picker-hint">Click anywhere on the map to place your parking spot.</small>
           </div>
 
           <div className="listing-row">
