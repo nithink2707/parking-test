@@ -121,6 +121,8 @@ const TAG_QUESTIONS = {
   "24/7 access": "Was access available when you arrived?",
   "Well lit": "Was the area well lit?",
   "Security guard": "Was a guard present on site?",
+  "2-Wheeler":"Is it for a 2-wheeler?",
+  "4-Wheeler":"Is it for a 4-Wheeler?"
 };
 
 
