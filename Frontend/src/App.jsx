@@ -279,7 +279,7 @@ function LocationPicker({ coordinates, onSelect }) {
 
 function ListingModal({ onClose, onCreate }) {
   const [name,setName] = useState("")
-  const [slots,setSlots] = useState(null)
+  const [slots,setSlots] = useState(1)
   const [location, setLocation] = useState("");
   const [coordinates, setCoordinates] = useState(null);
   const [price, setPrice] = useState(40);
@@ -309,7 +309,7 @@ function ListingModal({ onClose, onCreate }) {
   const submit = (event) => {
     event.preventDefault();
     if (!listingEnabled || !coordinates) return;
-    onCreate({ name: name.trim(), location: { lat: coordinates[0], lng: coordinates[1] }, price: Number(price) || 40, type, tags, image });
+    onCreate({ name: name.trim(), location: { x: coordinates[0], y: coordinates[1] }, price: Number(price) || 40, type, tags, slots: Number(slots), image });
   };
 
   return (
@@ -469,7 +469,7 @@ function ParkingApp() {
     );
   }, []);
 
-  const handleCreateListing = async ({name, location, price, type, tags }) => {
+  const handleCreateListing = async ({name, location, price, type, tags, slots }) => {
     try {
       const response = await fetch(`https://parking-test.onrender.com/insert`, {
         method: "POST",
