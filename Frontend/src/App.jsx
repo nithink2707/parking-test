@@ -227,7 +227,7 @@ function SpotMarker({ spot, selected, onSelect }) {
   );
 }
 
-function BuildingDataLoader({ setParkingSpots, refreshKey, onError }) {
+function BuildingDataLoader({ setParkingSpots, refreshKey, onError, onLoaded }) {
   useEffect(() => {
     let active = true;
 
@@ -264,6 +264,8 @@ function BuildingDataLoader({ setParkingSpots, refreshKey, onError }) {
         }));
       } catch (error) {
         if (active) onError(error.message);
+      } finally {
+        if (active) onLoaded();
       }
     }
 
@@ -271,7 +273,7 @@ function BuildingDataLoader({ setParkingSpots, refreshKey, onError }) {
     return () => {
       active = false;
     };
-  }, [onError, refreshKey, setParkingSpots]);
+  }, [onError, onLoaded, refreshKey, setParkingSpots]);
 
   return null;
 }
@@ -530,6 +532,7 @@ function ListingModal({ onClose, onCreate }) {
 
 function ParkingApp({ user }) {
   const [parkingSpots, setParkingSpots] = useState([]);
+  const [isBuildingsLoading, setIsBuildingsLoading] = useState(true);
   const [selectedId, setSelectedId] = useState("P-01");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("recommended");
@@ -665,6 +668,7 @@ function ParkingApp({ user }) {
 
       setListSpaceOpen(false);
       setStatus("Your parking spot is now listed.");
+      setIsBuildingsLoading(true);
       setBuildingsRefreshKey((value) => value + 1);
       if (activePanel === "mine") {
         setMyListingsLoading(true);
@@ -699,6 +703,7 @@ function ParkingApp({ user }) {
       await readApiJson(response, "Could not reserve this parking spot.");
 
       setStatus(`${selected.title} reserved successfully.`);
+      setIsBuildingsLoading(true);
       setBuildingsRefreshKey((value) => value + 1);
     } catch (error) {
       setStatus(error.message);
@@ -707,7 +712,7 @@ function ParkingApp({ user }) {
 
   return (
     <div className="ctrl-park-app">
-      <BuildingDataLoader setParkingSpots={setParkingSpots} refreshKey={buildingsRefreshKey} onError={setStatus} />
+      <BuildingDataLoader setParkingSpots={setParkingSpots} refreshKey={buildingsRefreshKey} onError={setStatus} onLoaded={setIsBuildingsLoading} />
       <header className="topbar">
         <div className="brand"><span className="brand-mark"><Icon name="car" size={18} /></span><span>{APP_NAME}</span></div>
 
@@ -721,7 +726,7 @@ function ParkingApp({ user }) {
           <div className="search-suggestion">
             <div className="search-suggestion-icon"><Icon name="pin" size={16} /></div>
             <div><strong>{destination?.name || query}</strong><span>{destination?.subtitle || "Search nearby parking"}</span></div>
-            <span className="search-suggestion-count">{filteredSpots.length} spots</span>
+            <span className="search-suggestion-count">{isBuildingsLoading ? "Loading..." : `${filteredSpots.length} spots`}</span>
           </div>
         )}
 
@@ -763,13 +768,13 @@ function ParkingApp({ user }) {
           </div>
 
           <div className="map-context"><div className="context-pin"><Icon name="pin" size={17} /></div><div><span>Parking near</span><strong>{destination?.name || "Electronic City, Bengaluru"}</strong></div></div>
-          {!resultsOpen && <button className="show-results-btn" type="button" onClick={() => setResultsOpen(true)}>Show parking <span>{filteredSpots.length}</span><Icon name="arrow" size={15} /></button>}
+          {!resultsOpen && <button className="show-results-btn" type="button" onClick={() => setResultsOpen(true)}>Show parking <span>{isBuildingsLoading ? "..." : filteredSpots.length}</span><Icon name="arrow" size={15} /></button>}
           {status && <div className="map-status">{status}</div>}
         </section>
 
         <aside className={`results-panel ${resultsOpen ? "" : "results-hidden"}`}>
           <div className="results-head">
-            <div><p className="results-kicker">{activePanel === "nearby" ? "Available nearby" : "Your spaces"}</p><h1>{activePanel === "nearby" ? `${filteredSpots.length} parking spots` : "Your listed buildings"}</h1></div>
+            <div><p className="results-kicker">{activePanel === "nearby" ? "Available nearby" : "Your spaces"}</p><h1>{activePanel === "nearby" ? (isBuildingsLoading ? "Loading parking..." : `${filteredSpots.length} parking spots`) : "Your listed buildings"}</h1></div>
             <button className="mobile-close" type="button" onClick={() => setResultsOpen(false)} aria-label="Close available nearby"><Icon name="close" /></button>
           </div>
 
@@ -784,6 +789,7 @@ function ParkingApp({ user }) {
           </div>}
 
           <div className="spot-list">
+            {activePanel === "nearby" && isBuildingsLoading && <div className="parking-loading" role="status"><span className="parking-loading-spinner" aria-hidden="true" /><span>Loading parking spots...</span></div>}
             {activePanel === "nearby" && sortedSpots.map((spot) => (
               <button key={spot.id} className={`spot-card ${spot.id === selectedId ? "selected" : ""}`} type="button" onClick={() => selectSpot(spot.id)}>
                 <div className="spot-thumb">
@@ -812,7 +818,7 @@ function ParkingApp({ user }) {
                 </button>
               );
             })}
-            {activePanel === "nearby" && filteredSpots.length === 0 && <div className="empty-state"><div className="empty-icon"><Icon name="search" size={20} /></div><strong>No spots found</strong><p>Try another destination or clear your search.</p></div>}
+            {activePanel === "nearby" && !isBuildingsLoading && filteredSpots.length === 0 && <div className="empty-state"><div className="empty-icon"><Icon name="search" size={20} /></div><strong>No spots found</strong><p>Try another destination or clear your search.</p></div>}
             {activePanel === "mine" && myListingsLoading && <div className="empty-state"><strong>Loading your listings…</strong></div>}
             {activePanel === "mine" && myListingsError && <div className="empty-state"><strong>Could not load listings</strong><p>{myListingsError}</p></div>}
             {activePanel === "mine" && !myListingsLoading && !myListingsError && myListings.length === 0 && <div className="empty-state"><div className="empty-icon"><Icon name="car" size={20} /></div><strong>No buildings listed yet</strong><p>Your parking spaces will appear here.</p></div>}

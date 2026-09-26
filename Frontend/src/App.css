@@ -471,6 +471,29 @@ button {
   scrollbar-width: thin;
 }
 
+.parking-loading {
+  display: flex;
+  min-height: 88px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.parking-loading-spinner {
+  width: 17px;
+  height: 17px;
+  border: 2px solid #dfe5df;
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: parking-spin 700ms linear infinite;
+}
+
+@keyframes parking-spin {
+  to { transform: rotate(360deg); }
+}
+
 .spot-card {
   display: grid;
   width: 100%;
