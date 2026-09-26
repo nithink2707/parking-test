@@ -13,7 +13,7 @@ import {
   MapContainer,
   TileLayer,
   Tooltip,
-  useMap,
+  useMapEvents,
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { auth } from "./firebase";
@@ -21,6 +21,7 @@ import "./App.css";
 
 const APP_NAME = "Ctrl+Park";
 const AUTH_SESSION_KEY = "ctrlpark-authenticated";
+const API_BASE_URL = import.meta.env.VITE_API_URL || "https://parking-test.onrender.com";
 const CENTER = [12.8407, 77.6763];
 
 const DESTINATIONS = [
@@ -33,73 +34,73 @@ const DESTINATIONS = [
   },
 ];
 
-const PARKING_SPOTS = [
-  {
-    id: "P-01",
-    title: "Private driveway",
-    address: "Near Electronic City Phase 1",
-    price: 30,
-    distance: "180 m",
-    walk: "2 min",
-    rating: 4.9,
-    type: "Driveway",
-    tags: ["CCTV", "EV charging"],
-    image: "",
-    coords: [12.8402, 77.6754],
-  },
-  {
-    id: "P-02",
-    title: "Apartment visitor bay",
-    address: "Neeladri Road",
-    price: 40,
-    distance: "320 m",
-    walk: "4 min",
-    rating: 4.8,
-    type: "Apartment",
-    tags: ["CCTV", "24/7 access"],
-    image: "",
-    coords: [12.8415, 77.6770],
-  },
-  {
-    id: "P-03",
-    title: "Covered parking",
-    address: "Hosur Road service lane",
-    price: 60,
-    distance: "450 m",
-    walk: "6 min",
-    rating: 4.7,
-    type: "Covered",
-    tags: ["Covered", "CCTV"],
-    image: "",
-    coords: [12.8395, 77.6782],
-  },
-  {
-    id: "P-04",
-    title: "Office parking",
-    address: "Phase 1 Main Road",
-    price: 35,
-    distance: "520 m",
-    walk: "7 min",
-    rating: 4.6,
-    type: "Office",
-    tags: ["CCTV"],
-    image: "",
-    coords: [12.8422, 77.6756],
-  },
-  {
-    id: "P-05",
-    title: "Residential parking",
-    address: "Doddathoguru",
-    price: 25,
-    distance: "650 m",
-    walk: "8 min",
-    rating: 4.9,
-    type: "Residential",
-    tags: ["CCTV", "Well lit"],
-    image: "",
-    coords: [12.8388, 77.6748],
-  },
-];
+// const PARKING_SPOTS = [
+//   {
+//     id: "P-01",
+//     title: "Private driveway",
+//     address: "Near Electronic City Phase 1",
+//     price: 30,
+//     distance: "180 m",
+//     walk: "2 min",
+//     rating: 4.9,
+//     type: "Driveway",
+//     tags: ["CCTV", "EV charging"],
+//     image: "",
+//     coords: [12.8402, 77.6754],
+//   },
+//   {
+//     id: "P-02",
+//     title: "Apartment visitor bay",
+//     address: "Neeladri Road",
+//     price: 40,
+//     distance: "320 m",
+//     walk: "4 min",
+//     rating: 4.8,
+//     type: "Apartment",
+//     tags: ["CCTV", "24/7 access"],
+//     image: "",
+//     coords: [12.8415, 77.6770],
+//   },
+//   {
+//     id: "P-03",
+//     title: "Covered parking",
+//     address: "Hosur Road service lane",
+//     price: 60,
+//     distance: "450 m",
+//     walk: "6 min",
+//     rating: 4.7,
+//     type: "Covered",
+//     tags: ["Covered", "CCTV"],
+//     image: "",
+//     coords: [12.8395, 77.6782],
+//   },
+//   {
+//     id: "P-04",
+//     title: "Office parking",
+//     address: "Phase 1 Main Road",
+//     price: 35,
+//     distance: "520 m",
+//     walk: "7 min",
+//     rating: 4.6,
+//     type: "Office",
+//     tags: ["CCTV"],
+//     image: "",
+//     coords: [12.8422, 77.6756],
+//   },
+//   {
+//     id: "P-05",
+//     title: "Residential parking",
+//     address: "Doddathoguru",
+//     price: 25,
+//     distance: "650 m",
+//     walk: "8 min",
+//     rating: 4.9,
+//     type: "Residential",
+//     tags: ["CCTV", "Well lit"],
+//     image: "",
+//     coords: [12.8388, 77.6748],
+//   },
+// ];
 
 const LISTING_TAGS = [
   "CCTV",
@@ -211,8 +212,76 @@ function SpotMarker({ spot, selected, onSelect }) {
   );
 }
 
+function BuildingDataLoader({ setParkingSpots, refreshKey, onError }) {
+  useEffect(() => {
+    let active = true;
+
+    async function loadBuildings() {
+      try {
+        const response = await fetch(`https://parking-test.onrender.com/api`);
+        if (!response.ok) throw new Error("Could not load parking buildings.");
+
+        const buildings = await response.json();
+        if (!active) return;
+
+        setParkingSpots(buildings.filter((building) => building.name && building.location).map((building) => {
+          const location = building.location;
+          const address = typeof location === "string"
+            ? location
+            : location?.address || location?.name || "Parking location";
+          const coords = Array.isArray(location) && location.length >= 2
+            ? location
+            : [location?.lat ?? location?.x ?? CENTER[0], location?.lng ?? location?.y ?? CENTER[1]];
+
+          return {
+            id: `building-${building.id}`,
+            title: building.name,
+            address,
+            price: building.fare,
+            distance: "Nearby",
+            walk: "—",
+            rating: 5,
+            type: building.type,
+            tags: building.tags || [],
+            image: building.image || "",
+            coords,
+          };
+        }));
+      } catch (error) {
+        if (active) onError(error.message);
+      }
+    }
+
+    loadBuildings();
+    return () => {
+      active = false;
+    };
+  }, [onError, refreshKey, setParkingSpots]);
+
+  return null;
+}
+
+function LocationPicker({ coordinates, onSelect }) {
+  useMapEvents({
+    click(event) {
+      onSelect([event.latlng.lat, event.latlng.lng]);
+    },
+  });
+
+  return coordinates ? (
+    <CircleMarker
+      center={coordinates}
+      radius={9}
+      pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#1e6b4d", fillOpacity: 1 }}
+    />
+  ) : null;
+}
+
 function ListingModal({ onClose, onCreate }) {
+  const [name,setName] = useState("")
+  const [slots,setSlots] = useState(null)
   const [location, setLocation] = useState("");
+  const [coordinates, setCoordinates] = useState(null);
   const [price, setPrice] = useState(40);
   const [type, setType] = useState("Private");
   const [tags, setTags] = useState([]);
@@ -232,10 +301,15 @@ function ListingModal({ onClose, onCreate }) {
     reader.readAsDataURL(file);
   };
 
+  const handleLocationSelect = ([latitude, longitude]) => {
+    setCoordinates([latitude, longitude]);
+    setLocation(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+  };
+
   const submit = (event) => {
     event.preventDefault();
-    if (!listingEnabled || !location.trim()) return;
-    onCreate({ location: location.trim(), price: Number(price) || 40, type, tags, image });
+    if (!listingEnabled || !coordinates) return;
+    onCreate({ name: name.trim(), location: { lat: coordinates[0], lng: coordinates[1] }, price: Number(price) || 40, type, tags, image });
   };
 
   return (
@@ -250,9 +324,10 @@ function ListingModal({ onClose, onCreate }) {
         </div>
 
         <p className="modal-copy">Share an unused driveway, apartment bay, or private spot and earn when someone parks there.</p>
+        <p></p>
 
         <form className="listing-fields" onSubmit={submit}>
-          <div className="listing-toggle-row">
+          {/* <div className="listing-toggle-row">
             <div>
               <strong>Accept parking bookings</strong>
               <span>Turn this off anytime to stop listing the spot.</span>
@@ -260,11 +335,27 @@ function ListingModal({ onClose, onCreate }) {
             <button type="button" className={`toggle ${listingEnabled ? "on" : ""}`} onClick={() => setListingEnabled((value) => !value)} aria-pressed={listingEnabled} aria-label="Toggle parking listing">
               <span />
             </button>
+          </div> */}
+
+          <label>Space Name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ajmera" required /></label>
+
+          <div className="location-picker-field">
+            <label>Parking location<input value={location} placeholder="Click the map to choose a location" readOnly required /></label>
+            <div className="listing-location-map" aria-label="Select parking location on map">
+              <MapContainer center={CENTER} zoom={15} zoomControl={false} scrollWheelZoom className="listing-map">
+                <TileLayer
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                  maxZoom={20}
+                />
+                <LocationPicker coordinates={coordinates} onSelect={handleLocationSelect} />
+              </MapContainer>
+            </div>
+            <small className="location-picker-hint">Click anywhere on the map to place your parking spot.</small>
           </div>
 
-          <label>Parking location<input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="e.g. 12th Main Road, Electronic City" required /></label>
-
           <div className="listing-row">
+            <label>Number of Slots<input value={slots} onChange={(event) => setSlots(event.target.value)} placeholder="1+" required /></label>
             <label>Price / hour<input type="number" min="1" value={price} onChange={(event) => setPrice(event.target.value)} placeholder="₹ 40" required /></label>
             <label>Spot type<select value={type} onChange={(event) => setType(event.target.value)}><option>Private</option><option>Covered</option><option>Apartment</option><option>Office</option><option>Residential</option></select></label>
           </div>
@@ -292,7 +383,7 @@ function ListingModal({ onClose, onCreate }) {
             </div>
           </div>
 
-          <button className="primary-btn publish-btn" type="submit" disabled={!listingEnabled || !location.trim()}>{listingEnabled ? "Publish parking spot" : "Listing is off"}<Icon name="arrow" size={16} /></button>
+          <button className="primary-btn publish-btn" type="submit" disabled={!listingEnabled || !coordinates}>{listingEnabled ? "Publish parking spot" : "Listing is off"}<Icon name="arrow" size={16} /></button>
         </form>
       </section>
     </div>
@@ -300,7 +391,7 @@ function ListingModal({ onClose, onCreate }) {
 }
 
 function ParkingApp() {
-  const [parkingSpots, setParkingSpots] = useState(PARKING_SPOTS);
+  const [parkingSpots, setParkingSpots] = useState([]);
   const [selectedId, setSelectedId] = useState("P-01");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("recommended");
@@ -309,6 +400,7 @@ function ParkingApp() {
   const [resultsOpen, setResultsOpen] = useState(true);
   const [listSpaceOpen, setListSpaceOpen] = useState(false);
   const [destination, setDestination] = useState(null);
+  const [buildingsRefreshKey, setBuildingsRefreshKey] = useState(0);
   const mapRef = useRef(null);
 
   const selected = parkingSpots.find((spot) => spot.id === selectedId) || parkingSpots[0];
@@ -344,6 +436,12 @@ function ParkingApp() {
     }
   }, [destinationMatch]);
 
+  useEffect(() => {
+    if (parkingSpots.length > 0 && !parkingSpots.some((spot) => spot.id === selectedId)) {
+      setSelectedId(parkingSpots[0].id);
+    }
+  }, [parkingSpots, selectedId]);
+
   const selectSpot = useCallback((id) => {
     setSelectedId(id);
     const spot = parkingSpots.find((item) => item.id === id);
@@ -371,31 +469,38 @@ function ParkingApp() {
     );
   }, []);
 
-  const handleCreateListing = ({ location, price, type, tags, image }) => {
-    const newSpot = {
-      id: `P-${String(parkingSpots.length + 1).padStart(2, "0")}`,
-      title: `${type} parking`,
-      address: location,
-      price,
-      distance: "Nearby",
-      walk: "—",
-      rating: 5.0,
-      type,
-      tags,
-      image,
-      coords: [CENTER[0] + (Math.random() - 0.5) * 0.004, CENTER[1] + (Math.random() - 0.5) * 0.004],
-    };
+  const handleCreateListing = async ({name, location, price, type, tags }) => {
+    try {
+      const response = await fetch(`https://parking-test.onrender.com/insert`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          data: {
+            name: name,
+            location,
+            fare: price,
+            type,
+            tags,
+            slots: slots,
+          },
+        }),
+      });
 
-    setParkingSpots((spots) => [newSpot, ...spots]);
-    setSelectedId(newSpot.id);
-    setListSpaceOpen(false);
-    setStatus("Your parking spot is now listed.");
-    setResultsOpen(true);
-    mapRef.current?.flyTo(newSpot.coords, 17.5, { duration: 0.8 });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || "Could not list your parking spot.");
+
+      setListSpaceOpen(false);
+      setStatus("Your parking spot is now listed.");
+      setBuildingsRefreshKey((value) => value + 1);
+      setResultsOpen(true);
+    } catch (error) {
+      setStatus(error.message);
+    }
   };
 
   return (
     <div className="ctrl-park-app">
+      <BuildingDataLoader setParkingSpots={setParkingSpots} refreshKey={buildingsRefreshKey} onError={setStatus} />
       <header className="topbar">
         <div className="brand"><span className="brand-mark"><Icon name="car" size={18} /></span><span>{APP_NAME}</span></div>
 
