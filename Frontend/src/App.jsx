@@ -132,6 +132,7 @@ function Icon({ name, size = 18, strokeWidth = 1.9 }) {
     pin: <><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></>,
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
     car: <><path d="m5 11 1.5-4h11l1.5 4" /><path d="M4 11h16v6H4z" /><path d="M7 17v2M17 17v2" /><circle cx="7.5" cy="14" r="1" /><circle cx="16.5" cy="14" r="1" /></>,
+    building: <><path d="M4 21h16" /><path d="M6 21V4h12v17" /><path d="M9 8h2M13 8h2M9 12h2M13 12h2M9 16h2M13 16h2" /></>,
     plus: <path d="M12 5v14M5 12h14" />,
     minus: <path d="M5 12h14" />,
     close: <path d="m6 6 12 12M18 6 6 18" />,
@@ -530,6 +531,164 @@ function ListingModal({ onClose, onCreate }) {
   );
 }
 
+
+
+function BuildingMiniMap({ coords, title }) {
+  if (!coords || coords.length < 2) return null;
+
+  return (
+    <div className="building-mini-map">
+      <MapContainer
+        center={coords}
+        zoom={17}
+        zoomControl={false}
+        scrollWheelZoom={false}
+        dragging={false}
+        doubleClickZoom={false}
+        touchZoom={false}
+        attributionControl={false}
+        className="building-mini-map-leaflet"
+      >
+        <TileLayer
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution="&copy; OpenStreetMap"
+          maxZoom={20}
+        />
+        <CircleMarker
+          center={coords}
+          radius={10}
+          pathOptions={{
+            color: "#ffffff",
+            weight: 3,
+            fillColor: "#1e6b4d",
+            fillOpacity: 1,
+          }}
+        >
+          <Tooltip direction="top" offset={[0, -8]} permanent opacity={1}>
+            <strong>{title}</strong>
+          </Tooltip>
+        </CircleMarker>
+      </MapContainer>
+
+      <div className="building-mini-map-label">
+        <Icon name="pin" size={13} />
+        <span>Parking location</span>
+      </div>
+    </div>
+  );
+}
+
+function BuildingDetailsModal({ spot, onClose, onReserve, reserving }) {
+  if (!spot) return null;
+
+  const availableSlots = spot.parkingSlots?.filter((slot) => slot.vacant).length ?? 0;
+  const totalSlots = spot.parkingSlots?.length ?? 0;
+  const hasAvailability = availableSlots > 0;
+
+  return (
+    <div className="building-modal-backdrop" onMouseDown={onClose}>
+      <section
+        className="building-details-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="building-details-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <button className="building-modal-close" type="button" onClick={onClose} aria-label="Close building details">
+          <Icon name="close" size={18} />
+        </button>
+
+        <div className="building-hero">
+          {spot.image ? (
+            <img src={spot.image} alt={`${spot.title} parking`} />
+          ) : (
+            <div className="building-image-placeholder">
+              <Icon name="building" size={46} strokeWidth={1.5} />
+              <span>Building photo coming soon</span>
+            </div>
+          )}
+          <div className="building-hero-overlay">
+            <span className="building-status">
+              <span className="building-status-dot" />
+              {hasAvailability ? "Available now" : "Currently full"}
+            </span>
+          </div>
+        </div>
+
+        <div className="building-details-content">
+          <div className="building-details-heading">
+            <div>
+              <p className="building-eyebrow">{spot.type || "Parking facility"}</p>
+              <h2 id="building-details-title">{spot.title}</h2>
+              <p className="building-address">
+                <Icon name="pin" size={14} />
+                {spot.address}
+              </p>
+            </div>
+            <div className="building-detail-price">
+              <strong>₹{spot.price}</strong>
+              <span>/ hour</span>
+            </div>
+          </div>
+
+          <BuildingMiniMap coords={spot.coords} title={spot.title} />
+
+          <div className="building-summary-grid">
+            <div className="building-summary-item">
+              <Icon name="star" size={17} />
+              <div><strong>{spot.rating}</strong><span>Rating</span></div>
+            </div>
+            <div className="building-summary-item">
+              <Icon name="car" size={17} />
+              <div><strong>{availableSlots}{totalSlots ? ` / ${totalSlots}` : ""}</strong><span>Slots available</span></div>
+            </div>
+            <div className="building-summary-item">
+              <Icon name="clock" size={17} />
+              <div><strong>{spot.walk === "—" ? "Nearby" : spot.walk}</strong><span>Walking time</span></div>
+            </div>
+          </div>
+
+          <div className="building-detail-section">
+            <div className="building-section-title">
+              <strong>Features & amenities</strong>
+              <span>{spot.tags?.length || 0} features</span>
+            </div>
+
+            {spot.tags?.length > 0 ? (
+              <div className="building-feature-grid">
+                {spot.tags.map((tag) => (
+                  <div className="building-feature" key={tag}>
+                    <span className="building-feature-check"><Icon name="check" size={13} /></span>
+                    <span>{tag}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="building-no-features">No additional features have been added yet.</p>
+            )}
+          </div>
+
+          <div className="building-reserve-area">
+            <div>
+              <span className="building-reserve-label">Parking rate</span>
+              <strong>₹{spot.price}<small>/hr</small></strong>
+            </div>
+            <button
+              className="primary-btn building-reserve-btn"
+              type="button"
+              onClick={onReserve}
+              disabled={!hasAvailability || reserving}
+            >
+              {reserving ? "Reserving…" : hasAvailability ? "Reserve this spot" : "No spots available"}
+              {!reserving && <Icon name="arrow" size={16} />}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function ParkingApp({ user }) {
   const [parkingSpots, setParkingSpots] = useState([]);
   const [isBuildingsLoading, setIsBuildingsLoading] = useState(true);
@@ -547,6 +706,8 @@ function ParkingApp({ user }) {
   const [listingsRefreshKey, setListingsRefreshKey] = useState(0);
   const [destination, setDestination] = useState(null);
   const [buildingsRefreshKey, setBuildingsRefreshKey] = useState(0);
+  const [buildingDetailsOpen, setBuildingDetailsOpen] = useState(false);
+  const [isReserving, setIsReserving] = useState(false);
   const mapRef = useRef(null);
 
   const selected = parkingSpots.find((spot) => spot.id === selectedId) || parkingSpots[0];
@@ -626,7 +787,7 @@ function ParkingApp({ user }) {
     const spot = parkingSpots.find((item) => item.id === id);
     if (spot) {
       setResultsOpen(true);
-      mapRef.current?.flyTo(spot.coords, 17.5, { duration: 0.7 });
+      setBuildingDetailsOpen(true);
     }
   }, [parkingSpots]);
 
@@ -698,6 +859,8 @@ function ParkingApp({ user }) {
       return;
     }
 
+    setIsReserving(true);
+
     try {
       const response = await fetch(`${API_BASE_URL}/booking`, {
         method: "POST",
@@ -712,11 +875,14 @@ function ParkingApp({ user }) {
       });
       await readApiJson(response, "Could not reserve this parking spot.");
 
+      setBuildingDetailsOpen(false);
       setStatus(`${selected.title} reserved successfully.`);
       setIsBuildingsLoading(true);
       setBuildingsRefreshKey((value) => value + 1);
     } catch (error) {
       setStatus(error.message);
+    } finally {
+      setIsReserving(false);
     }
   };
 
@@ -803,7 +969,7 @@ function ParkingApp({ user }) {
             {activePanel === "nearby" && sortedSpots.map((spot) => (
               <button key={spot.id} className={`spot-card ${spot.id === selectedId ? "selected" : ""}`} type="button" onClick={() => selectSpot(spot.id)}>
                 <div className="spot-thumb">
-                  {spot.image ? <img src={spot.image} alt="Parking spot" /> : <Icon name="car" size={23} />}
+                  {spot.image ? <img className="spot-thumb-image" src={spot.image} alt={`${spot.title} parking`} /> : <Icon name="car" size={23} />}
                   <span>OPEN</span>
                 </div>
                 <div className="spot-main">
@@ -834,8 +1000,16 @@ function ParkingApp({ user }) {
             {activePanel === "mine" && !myListingsLoading && !myListingsError && myListings.length === 0 && <div className="empty-state"><div className="empty-icon"><Icon name="car" size={20} /></div><strong>No buildings listed yet</strong><p>Your parking spaces will appear here.</p></div>}
           </div>
 
-          {activePanel === "nearby" && selected && resultsOpen && <div className="selected-drawer"><div className="drawer-line"><div><span className="drawer-label">Your selected spot</span><strong>{selected.title}</strong></div><div className="drawer-price">₹{selected.price}<small>/hr</small></div></div><button className="primary-btn reserve-btn" type="button" onClick={handleReserve} disabled={!selected.parkingSlots?.some((slot) => slot.vacant)}>Reserve spot <Icon name="arrow" size={16} /></button></div>}
         </aside>
+
+        {activePanel === "nearby" && selected && buildingDetailsOpen && (
+          <BuildingDetailsModal
+            spot={selected}
+            onClose={() => setBuildingDetailsOpen(false)}
+            onReserve={handleReserve}
+            reserving={isReserving}
+          />
+        )}
 
         {listSpaceOpen && <ListingModal onClose={() => setListSpaceOpen(false)} onCreate={handleCreateListing} />}
       </main>
