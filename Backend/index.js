@@ -24,6 +24,7 @@ app.get('/api',async (req,res) => {
                 b.tags,
                 b.slots,
                 b.image,
+                b.userid,
                 COALESCE(
                     json_agg(
                         json_build_object(
@@ -156,6 +157,9 @@ app.get('/vacancy/:buildingId', async (req,res) => {
     if (startTime && new Date(startTime) >= new Date(endTime)) {
         return res.status(400).json({message:'end_time must be after start_time'});
     }
+    if (startTime && new Date(startTime) <= new Date()) {
+        return res.status(400).json({message:'start_time must be in the future'});
+    }
 
     try {
         const query = startTime
@@ -206,9 +210,10 @@ app.post('/booking', async (req,res) => {
         typeof endTime !== 'string' ||
         !isValidDate(startTime) ||
         !isValidDate(endTime) ||
-        new Date(startTime) >= new Date(endTime)
+        new Date(startTime) >= new Date(endTime) ||
+        new Date(startTime) <= new Date()
     ) {
-        return res.status(400).json({message:'user_id, slot_id, and valid start_time and end_time are required; end_time must be after start_time'});
+        return res.status(400).json({message:'user_id, slot_id, and valid future start_time and end_time are required; end_time must be after start_time'});
     }
 
     const client = await pool.connect();
@@ -216,12 +221,20 @@ app.post('/booking', async (req,res) => {
         await client.query('BEGIN');
 
         const slot = await client.query(
-            'SELECT id FROM parking_slots WHERE id = $1 FOR UPDATE',
+            `SELECT s.id, b.userid
+             FROM parking_slots s
+             JOIN buildings b ON b.id = s.building_id
+             WHERE s.id = $1
+             FOR UPDATE OF s, b`,
             [slotId]
         );
         if (slot.rowCount === 0) {
             await client.query('ROLLBACK');
             return res.status(404).json({message:'parking slot not found'});
+        }
+        if (slot.rows[0].userid === userId) {
+            await client.query('ROLLBACK');
+            return res.status(403).json({message:'you cannot reserve your own parking space'});
         }
         const conflict = await client.query(
             `SELECT 1
@@ -243,10 +256,15 @@ app.post('/booking', async (req,res) => {
 
         const created = await client.query(
             `INSERT INTO bookings (user_id, slot_id, start_time, end_time, status, created_at)
-             VALUES ($1, $2, $3::timestamptz, $4::timestamptz, 'confirmed', NOW())
+             SELECT $1, $2, $3::timestamptz, $4::timestamptz, 'confirmed', NOW()
+             WHERE $3::timestamptz > NOW()
              RETURNING id, user_id, slot_id, start_time, end_time, status, created_at`,
             [userId, slotId, startTime, endTime]
         );
+        if (created.rowCount === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({message:'start_time must be in the future'});
+        }
         await client.query('COMMIT');
         res.status(201).json(created.rows[0]);
     } catch (error) {

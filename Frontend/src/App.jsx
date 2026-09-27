@@ -261,6 +261,7 @@ function BuildingDataLoader({ setParkingSpots, refreshKey, onError, onLoaded }) 
             type: building.type,
             tags: building.tags || [],
             image: building.image || "",
+            userId: building.userid,
             parkingSlots: building.parking_slots || [],
             coords,
           };
@@ -295,6 +296,10 @@ function LocationPicker({ coordinates, onSelect }) {
       pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#1e6b4d", fillOpacity: 1 }}
     />
   ) : null;
+}
+
+function ParkNPay({}) {
+  const 
 }
 
 function AccountMenu({ onShowListings, onSignOut }) {
@@ -858,7 +863,7 @@ function BookingTimeModal({ spot, onClose, onReserve, reserving }) {
     const start = new Date(startTime);
     const end = new Date(endTime);
 
-    if (start < new Date()) {
+    if (start <= new Date()) {
       setError("Choose a start time in the future.");
       return;
     }
@@ -948,7 +953,7 @@ function ReviewSection({ reviews, rating, reviewCount, loading }) {
   );
 }
 
-function BuildingDetailsModal({ spot, onClose, onReserve, reserving, reviews = [], reviewRating, reviewCount, reviewsLoading }) {
+function BuildingDetailsModal({ spot, onClose, onReserve, reserving, isOwner, reviews = [], reviewRating, reviewCount, reviewsLoading }) {
   if (!spot) return null;
 
   const totalSlots = spot.parkingSlots?.length ?? 0;
@@ -1053,9 +1058,9 @@ function BuildingDetailsModal({ spot, onClose, onReserve, reserving, reviews = [
               className="primary-btn building-reserve-btn"
               type="button"
               onClick={onReserve}
-              disabled={!hasAvailability || reserving}
+              disabled={!hasAvailability || reserving || isOwner}
             >
-              {reserving ? "Reserving…" : hasAvailability ? "Reserve this spot" : "No spots available"}
+              {isOwner ? "Your listed space" : reserving ? "Reserving..." : hasAvailability ? "Reserve this spot" : "No spots available"}
               {!reserving && <Icon name="arrow" size={16} />}
             </button>
           </div>
@@ -1609,6 +1614,7 @@ function ParkingApp({ user }) {
           return (
             <BuildingDetailsModal
               spot={selected}
+              isOwner={selected.userId === user.uid}
               onClose={() => setBuildingDetailsOpen(false)}
               onReserve={() => {
                 setBuildingDetailsOpen(false);
